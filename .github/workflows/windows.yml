@@ -1,0 +1,31 @@
+name: Build Windows VST3
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        run: cmake --build build --config Release --parallel 2
+
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: melotheon-vst3
+          path: build/Melotheon_artefacts/Release/VST3/Melotheon.vst3
+          if-no-files-found: error
+          retention-days: 14
