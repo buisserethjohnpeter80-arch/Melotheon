@@ -64,9 +64,17 @@ void LevelMeterComponent::paint (juce::Graphics& g)
         juce::Rectangle<float> seg (innerX, y, innerW, segmentH);
         if (i < litSegments)
         {
-            // Top ~25% of the meter is yellow, the rest is green.
+            // Colour bands over the -60..0 dB range:
+            // green -60..-12 dB, yellow -12..-3 dB, orange above -3 dB.
+            // level is 0..1 over -60..0 dB, so -12 dB -> 0.80 and
+            // -3 dB -> 0.95.
             const float fraction = static_cast<float> (i + 1) / static_cast<float> (numSegments);
-            g.setColour (fraction > 0.75f ? Tokens::meterYellow : Tokens::meterGreen);
+            if (fraction > 0.95f)
+                g.setColour (Tokens::activeOrange);
+            else if (fraction > 0.80f)
+                g.setColour (Tokens::meterYellow);
+            else
+                g.setColour (Tokens::meterGreen);
         }
         else
         {
