@@ -1,8 +1,12 @@
-// MelotheonAudioProcessorEditor implementation (Phase 1).
-// See PluginEditor.h for the layout contract and the Phase 1 limits:
-// visual interaction only, no audio or MIDI behaviour yet.
+// MelotheonAudioProcessorEditor implementation (Phase 2).
+// See PluginEditor.h for the layout contract: Phase 1 interface with
+// the Phase 2 audio foundation wired in (record / import / preview /
+// meter / waveform / status). ANALYZE, SEND TO CHANNEL, DRAG MIDI TO
+// FL and PLAY INSTRUMENT are still non-functional.
 
 #include "PluginEditor.h"
+
+#include "Audio/AudioFileLoader.h"
 
 namespace
 {
@@ -60,37 +64,73 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
     recordButton.setClickingTogglesState (false);
     playButton.setClickingTogglesState (false);
     stopButton.setClickingTogglesState (false);
-    // Record opens orange (selected) to match the reference image:
-    // a solid orange record button from the moment the plugin opens.
-    // Clicking it toggles it off; clicking Play untoggles it.
-    recordButton.setToggleState (true, juce::dontSendNotification);
-    // Visual selected state only: no audio operation is started.
+
+    // Record toggles a live take. It starts OFF: the button only
+    // shows its active orange state while actually recording.
     recordButton.onClick = [this]
     {
-        const bool on = ! recordButton.getToggleState();
-        recordButton.setToggleState (on, juce::dontSendNotification);
-        if (on)
+        if (audioProcessor.isRecording())
+        {
+            audioProcessor.stopRecording(); // finalizes -> AUDIO READY
+            recordButton.setToggleState (false, juce::dontSendNotification);
             playButton.setToggleState (false, juce::dontSendNotification);
+            audioProcessor.setPlayOriginalParameter (false);
+        }
+        else if (audioProcessor.startRecording())
+        {
+            recordButton.setToggleState (true, juce::dontSendNotification);
+            playButton.setToggleState (false, juce::dontSendNotification);
+            audioProcessor.setPlayOriginalParameter (false);
+        }
+        else
+        {
+            // Not LIVE INPUT, or a take is already running: the
+            // processor set the status message (e.g. USE LIVE INPUT).
+            recordButton.setToggleState (false, juce::dontSendNotification);
+        }
     };
+
+    // Play toggles preview from the current internal position.
+    // Pressing it again pauses (position kept); Stop resets it.
     playButton.onClick = [this]
     {
-        const bool on = ! playButton.getToggleState();
-        playButton.setToggleState (on, juce::dontSendNotification);
-        if (on)
+        if (audioProcessor.isPreviewPlaying())
+        {
+            audioProcessor.pausePreview();
+            playButton.setToggleState (false, juce::dontSendNotification);
+            audioProcessor.setPlayOriginalParameter (false);
+        }
+        else if (audioProcessor.startPreview())
+        {
+            playButton.setToggleState (true, juce::dontSendNotification);
             recordButton.setToggleState (false, juce::dontSendNotification);
+            audioProcessor.setPlayOriginalParameter (true);
+        }
+        else
+        {
+            // No clip to play: the processor set EMPTY SOURCE.
+            playButton.setToggleState (false, juce::dontSendNotification);
+        }
     };
+
+    // Stop finalizes a take in progress, otherwise stops preview
+    // and returns the cursor to the beginning.
     stopButton.onClick = [this]
     {
+        if (audioProcessor.isRecording())
+            audioProcessor.stopRecording();
+        else
+            audioProcessor.stopPreview();
+
         recordButton.setToggleState (false, juce::dontSendNotification);
         playButton.setToggleState (false, juce::dontSendNotification);
+        audioProcessor.setPlayOriginalParameter (false);
     };
 
     addAndMakeVisible (inputSourceBox);
     styleComboBox (inputSourceBox);
-    inputSourceBox.addItem ("INPUT: VOICE", 1);
-    inputSourceBox.addItem ("INPUT: GUITAR", 2);
-    inputSourceBox.addItem ("INPUT: PIANO", 3);
-    inputSourceBox.addItem ("INPUT: LINE", 4);
+    inputSourceBox.addItem ("LIVE INPUT", 1);
+    inputSourceBox.addItem ("IMPORTED AUDIO", 2);
 
     addAndMakeVisible (statusLabel);
     styleLcdLabel (statusLabel);
@@ -107,16 +147,10 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
     addAndMakeVisible (importAudioButton);
     styleTextButton (importAudioButton, Tokens::raisedPanel, Tokens::primaryText);
-    importAudioButton.onClick = []
-    {
-        // TODO: PHASE_2_AUDIO_LOGIC
-    };
+    importAudioButton.onClick = [this] { startImport(); };
 
     addAndMakeVisible (importFolderButton);
-    importFolderButton.onClick = []
-    {
-        // TODO: PHASE_2_AUDIO_LOGIC
-    };
+    importFolderButton.onClick = [this] { startImport(); };
 
     addAndMakeVisible (monoButton);
     addAndMakeVisible (noiseGateLabel);
@@ -146,7 +180,7 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
     addAndMakeVisible (instrumentFolderButton);
     instrumentFolderButton.onClick = []
     {
-        // TODO: PHASE_2_AUDIO_LOGIC
+        // TODO: PHASE_3_AUDIO_LOGIC
     };
 
     addAndMakeVisible (midiOutButton);
@@ -160,12 +194,36 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
     dragMidiButton.setText ("DRAG MIDI TO FL");
     dragMidiButton.onClick = []
     {
-        // TODO: PHASE_2_AUDIO_LOGIC
+        // TODO: PHASE_3_AUDIO_LOGIC
     };
 
     addAndMakeVisible (playOriginalButton);
     playOriginalButton.setText ("PLAY ORIGINAL");
     playOriginalButton.setClickingTogglesState (true);
+    // The button is attached to the "playOriginal" parameter, so a
+    // click already flipped its toggle state when this runs.
+    playOriginalButton.onClick = [this]
+    {
+        if (playOriginalButton.getToggleState())
+        {
+            if (audioProcessor.startPreview())
+            {
+                playButton.setToggleState (true, juce::dontSendNotification);
+                recordButton.setToggleState (false, juce::dontSendNotification);
+            }
+            else
+            {
+                // No clip to play: keep the parameter in sync (off).
+                audioProcessor.setPlayOriginalParameter (false);
+                playButton.setToggleState (false, juce::dontSendNotification);
+            }
+        }
+        else
+        {
+            audioProcessor.stopPreview();
+            playButton.setToggleState (false, juce::dontSendNotification);
+        }
+    };
 
     addAndMakeVisible (playInstrumentButton);
     playInstrumentButton.setText ("PLAY INSTRUMENT");
@@ -207,14 +265,14 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
     styleTextButton (analyzeButton, Tokens::activeOrange, juce::Colours::black);
     analyzeButton.onClick = []
     {
-        // TODO: PHASE_2_AUDIO_LOGIC
+        // TODO: PHASE_3_AUDIO_LOGIC
     };
 
     addAndMakeVisible (sendToChannelButton);
     styleTextButton (sendToChannelButton, Tokens::raisedPanel, Tokens::primaryText);
     sendToChannelButton.onClick = []
     {
-        // TODO: PHASE_2_AUDIO_LOGIC
+        // TODO: PHASE_3_AUDIO_LOGIC
     };
 
     // ---- Parameter attachments (after all items exist). ----
@@ -247,7 +305,8 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
         apvts, "midiChannel", midiChannelBox);
 
     updateKeyLabel();
-    startTimer (200);
+    // ~30 Hz: meter, playhead, status and clip polling.
+    startTimer (33);
 
     setResizable (true, true);
     setResizeLimits (1000, 400, 1800, 720);
@@ -259,8 +318,33 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
 MelotheonAudioProcessorEditor::~MelotheonAudioProcessorEditor()
 {
+    editorAlive->store (false, std::memory_order_release);
     stopTimer();
     setLookAndFeel (nullptr);
+}
+
+void MelotheonAudioProcessorEditor::startImport()
+{
+    if (fileChooser != nullptr)
+        return; // a chooser is already open
+
+    fileChooser = std::make_unique<juce::FileChooser> (
+        "Import Audio", juce::File{}, AudioFileLoader::getFileFilter());
+
+    auto alive = editorAlive;
+    fileChooser->launchAsync (
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [this, alive] (const juce::FileChooser& chooser)
+        {
+            fileChooser.reset();
+
+            if (! alive->load (std::memory_order_acquire))
+                return; // editor was closed while choosing
+
+            const juce::File file = chooser.getResult();
+            if (file.existsAsFile())
+                audioProcessor.startFileImport (file);
+        });
 }
 
 juce::Rectangle<int> MelotheonAudioProcessorEditor::scaledRect (int x, int y, int width,
@@ -340,7 +424,69 @@ void MelotheonAudioProcessorEditor::updateKeyLabel()
 
 void MelotheonAudioProcessorEditor::timerCallback()
 {
+    using namespace melotheon;
     updateKeyLabel();
+
+    // ---- Status LCD (green; orange for Error / Limit Reached). ----
+    const auto status = audioProcessor.getStatus();
+    const int statusId = static_cast<int> (status);
+    const juce::String statusText = audioProcessor.getStatusText();
+    if (statusText != lastStatusText)
+    {
+        lastStatusText = statusText;
+        statusLabel.setText (statusText, juce::dontSendNotification);
+    }
+    if (statusId != lastStatusSeen)
+    {
+        lastStatusSeen = statusId;
+        const bool isWarning = (status == MelotheonAudioProcessor::Status::Error
+                             || status == MelotheonAudioProcessor::Status::LimitReached);
+        statusLabel.setColour (juce::Label::textColourId,
+                               isWarning ? Tokens::activeOrange : Tokens::statusGreen);
+    }
+
+    // ---- Input meter: smoothed peak dB (-60..0) -> 0..1. ----
+    const float peakDb = audioProcessor.getInputPeakDb();
+    levelMeter.setLevel (juce::jlimit (0.0f, 1.0f, (peakDb + 60.0f) / 60.0f));
+
+    // ---- Waveform: install a new clip when the processor publishes one. ----
+    const int version = audioProcessor.getClipVersion();
+    if (version != lastClipVersionSeen)
+    {
+        lastClipVersionSeen = version;
+        pitchEditor.setClip (audioProcessor.getActiveClip());
+    }
+
+    // ---- Playhead follows preview playback. ----
+    pitchEditor.setPlayheadPosition (audioProcessor.getPreviewPositionSeconds());
+
+    // ---- Playback ended naturally: STOPPED + untoggle preview. ----
+    if (audioProcessor.consumePlaybackEnded())
+    {
+        audioProcessor.setStatus (MelotheonAudioProcessor::Status::Stopped);
+        audioProcessor.setPlayOriginalParameter (false);
+        playButton.setToggleState (false, juce::dontSendNotification);
+    }
+
+    // ---- A take that hit the 60 s limit is finalized here (message
+    // thread): the audio thread only flags the limit. ----
+    if (status == MelotheonAudioProcessor::Status::LimitReached)
+        audioProcessor.finalizeRecordingFromLimit();
+
+    // ---- Keep the transport buttons in sync with the processor. ----
+    const bool recording = audioProcessor.isRecording();
+    if (recordButton.getToggleState() != recording)
+        recordButton.setToggleState (recording, juce::dontSendNotification);
+
+    const bool playing = audioProcessor.isPreviewPlaying();
+    if (playButton.getToggleState() != playing)
+        playButton.setToggleState (playing, juce::dontSendNotification);
+
+    if (lastPlayOriginalParam != playing)
+    {
+        lastPlayOriginalParam = playing;
+        audioProcessor.setPlayOriginalParameter (playing);
+    }
 }
 
 void MelotheonAudioProcessorEditor::resized()
