@@ -4,7 +4,7 @@ Melotheon is a professional Windows VST3 plugin for FL Studio: capture a
 melody (voice, guitar, piano) and turn it into MIDI on a channel
 instrument.
 
-## Phase 1 — visual interface (current)
+## Phase 1 — visual interface (complete)
 
 This phase builds the **complete visual interface only**:
 
@@ -25,16 +25,44 @@ Every control is a real JUCE component. Knobs are draggable, dropdowns
 open with placeholder choices, and Record / Play / Stop change their
 visual selected state only.
 
+## Phase 2 — audio foundation (current)
+
+Phase 2 connects the audio foundation to the Phase 1 interface, with
+no change to the layout, colours, sizes or brand text:
+
+- **Live capture:** audio arriving from the FL Studio Mixer Track
+  through `processBlock()` is recorded into a preallocated 60 s
+  buffer (Record / Stop). No allocation happens in `processBlock()`.
+- **Import Audio:** WAV, AIFF and FLAC (plus MP3 when the JUCE
+  configuration enables it) are decoded on a worker thread via
+  `juce::FileChooser::launchAsync()`; the UI never freezes.
+- **Preview:** Play / Stop / Play Original play the active clip
+  through the Mixer Track, resampled to the host rate so speed and
+  pitch stay correct. The green playhead follows playback.
+- **Meter:** the vertical meter shows the real smoothed input peak
+  (-60..0 dB; green -60..-12, yellow -12..-3, orange above -3).
+- **Waveform:** the real clip waveform replaces the placeholder; the
+  placeholder notes are hidden and the editor shows
+  "AUDIO READY · CLICK ANALYZE".
+- **Status LCD:** READY / LOADING / RECORDING / AUDIO READY /
+  PLAYING / STOPPED / NO INPUT / ERROR / LIMIT REACHED / EMPTY SOURCE.
+- **Input source:** LIVE INPUT (record host audio) or IMPORTED AUDIO
+  (play the loaded file / recorded clip).
+
+The active clip is an immutable `AudioClip` (original channels kept
+for preview, separate mono copy for future analysis) held as
+`std::atomic<std::shared_ptr<const AudioClip>>`.
+
 ## What is NOT implemented yet
 
 - Pitch detection, audio analysis, MIDI generation.
-- Instrument hosting, audio recording.
-- Choir generation, voice multiplication.
+- Instrument hosting, choir generation, voice multiplication.
 - AI / ONNX models.
 - Real Send to Channel / Drag MIDI behaviour.
+- ANALYZE, SEND TO CHANNEL, DRAG MIDI TO FL and PLAY INSTRUMENT
+  are still non-functional.
 
-These are marked `// TODO: PHASE_2_AUDIO_LOGIC` in the code. The
-processor passes incoming audio through unchanged.
+These are marked `// TODO: PHASE_3_AUDIO_LOGIC` in the code.
 
 ## Build (Windows, GitHub Actions)
 
@@ -53,6 +81,12 @@ The `.vst3` bundle lands under
 `build/Melotheon_artefacts/Release/VST3/`. Copy it to the VST3 folder
 (usually `C:\Program Files\Common Files\VST3\`) and rescan plugins in
 FL Studio.
+
+Run the Phase 2 unit tests after any build:
+
+```bat
+ctest --test-dir build -C Release --output-on-failure
+```
 
 ## Tech
 
