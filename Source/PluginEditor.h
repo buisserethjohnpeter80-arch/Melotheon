@@ -1,6 +1,6 @@
 #pragma once
 
-// MelotheonAudioProcessorEditor - the plugin UI (Phase 1).
+// MelotheonAudioProcessorEditor - the plugin UI (Phase 2).
 //
 // Reference: the attached "MELODY CAPTURE" mockup (dark FL Studio-style
 // panels, orange active states, green status displays, central piano
@@ -11,14 +11,19 @@
 // soundwave-M (logo #5: vertical waveform bars forming an M, orange to
 // gold) drawn with juce::Graphics.
 //
-// Phase 1 is the VISUAL interface only. Every button, knob, display,
-// dropdown, meter and panel is a real JUCE component, but:
-//   * Record / Play / Stop change their visual selected state only.
-//   * ANALYZE, IMPORT AUDIO, DRAG MIDI TO FL and SEND TO CHANNEL have
-//     empty callbacks (TODO: PHASE_2_AUDIO_LOGIC).
-//   * No pitch detection, audio analysis, MIDI generation, instrument
-//     hosting, recording, choir generation or AI exists in this phase.
-//   * The interface never claims real analysis or MIDI export happened.
+// Phase 2 connects the audio foundation to the Phase 1 interface:
+// Record captures host audio, Import Audio loads WAV / AIFF / FLAC
+// (+ MP3 when JUCE enables it), the meter shows real input level,
+// the waveform shows the real clip, and Play / Stop / Play Original
+// preview it. The layout, colours, sizes and brand text are unchanged
+// from Phase 1. ANALYZE, SEND TO CHANNEL, DRAG MIDI TO FL and PLAY
+// INSTRUMENT are still non-functional (Phase 3+): no pitch detection,
+// no MIDI generation, no instrument hosting exists yet.
+//
+// The editor polls the processor on a ~30 Hz timer (meter, playhead,
+// status, clip version) and never touches the audio thread directly.
+// All audio work is triggered through the processor's message-thread
+// API; the processor owns the engines and the active clip.
 //
 // Layout: all bounds are computed in resized() from the 1400 x 560
 // base coordinates in melotheon::Tokens, scaled uniformly so the
@@ -31,6 +36,7 @@
 // "MELOTHEON" (see melotheon::brandTextUtf8, explicit UTF-8 bytes).
 
 #include <JuceHeader.h>
+#include <atomic>
 #include <memory>
 #include "PluginProcessor.h"
 #include "UI/MelotheonLookAndFeel.h"
@@ -61,12 +67,32 @@ private:
     void styleLcdLabel (juce::Label& label);
     void updateKeyLabel();
 
+    // Open the import FileChooser (WAV / AIFF / FLAC, + MP3 when
+    // JUCE enables it). The chooser is kept alive in fileChooser
+    // until its async callback runs.
+    void startImport();
+
     MelotheonAudioProcessor& audioProcessor;
     MelotheonLookAndFeel lookAndFeel;
     float scaleFactor = 1.0f;
     float offsetX = 0.0f;
     float offsetY = 0.0f;
     juce::String lastKeyText;
+
+    // Set to false in the destructor so a late FileChooser callback
+    // never touches a destroyed editor.
+    std::shared_ptr<std::atomic<bool>> editorAlive
+        = std::make_shared<std::atomic<bool>> (true);
+
+    // Polled state (timerCallback only): -1 / empty forces a refresh
+    // on the first tick, so an editor opened after a clip was loaded
+    // still shows it.
+    int lastClipVersionSeen = -1;
+    int lastStatusSeen = -1;
+    juce::String lastStatusText;
+    bool lastPlayOriginalParam = false;
+
+    std::unique_ptr<juce::FileChooser> fileChooser;
 
     // Header.
     IconButton recordButton { IconButton::Kind::Record };
