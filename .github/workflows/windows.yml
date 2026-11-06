@@ -51,15 +51,27 @@ jobs:
           Expand-Archive -Path $zip -DestinationPath $validatorDir -Force
           New-Item -ItemType Directory -Path $resultsDir -Force | Out-Null
 
-          & (Join-Path $validatorDir "pluginval.exe") `
-            --strictness-level 5 `
-            --skip-gui-tests `
-            --timeout-ms 60000 `
-            --output-dir $resultsDir `
-            --validate $pluginPath
+          # pluginval.exe is built as a Windows GUI application. Calling it
+          # directly from PowerShell returns before validation has finished,
+          # leaving $LASTEXITCODE empty even when the report later says
+          # SUCCESS. Start-Process -Wait observes the real final exit code.
+          $validator = Join-Path $validatorDir "pluginval.exe"
+          $arguments = @(
+            "--strictness-level", "5",
+            "--skip-gui-tests",
+            "--timeout-ms", "60000",
+            "--output-dir", $resultsDir,
+            "--validate", $pluginPath
+          )
+          $validation = Start-Process `
+            -FilePath $validator `
+            -ArgumentList $arguments `
+            -Wait `
+            -PassThru `
+            -NoNewWindow
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "pluginval failed with exit code $LASTEXITCODE"
+          if ($validation.ExitCode -ne 0) {
+            throw "pluginval failed with exit code $($validation.ExitCode)"
           }
 
       - name: Upload validation logs
