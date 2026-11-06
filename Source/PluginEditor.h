@@ -1,6 +1,6 @@
 #pragma once
 
-// MelotheonAudioProcessorEditor - the plugin UI (Phase 2).
+// MelotheonAudioProcessorEditor - the plugin UI (Phase 3A).
 //
 // Reference: the attached "MELODY CAPTURE" mockup (dark FL Studio-style
 // panels, orange active states, green status displays, central piano
@@ -16,9 +16,10 @@
 // (+ MP3 when JUCE enables it), the meter shows real input level,
 // the waveform shows the real clip, and Play / Stop / Play Original
 // preview it. The layout, colours, sizes and brand text are unchanged
-// from Phase 1. ANALYZE, SEND TO CHANNEL, DRAG MIDI TO FL and PLAY
-// INSTRUMENT are still non-functional (Phase 3+): no pitch detection,
-// no MIDI generation, no instrument hosting exists yet.
+// from Phase 1. ANALYZE now runs offline monophonic pitch tracking and
+// paints its curve/confidence. SEND TO CHANNEL, DRAG MIDI TO FL and
+// PLAY INSTRUMENT remain later phases: no MIDI generation or instrument
+// hosting exists yet.
 //
 // The editor polls the processor on a ~30 Hz timer (meter, playhead,
 // status, clip version) and never touches the audio thread directly.
@@ -82,9 +83,13 @@ private:
     // on the first tick, so an editor opened after a clip was loaded
     // still shows it.
     int lastClipVersionSeen = -1;
+    int lastAnalysisVersionSeen = -1;
     int lastStatusSeen = -1;
     juce::String lastStatusText;
+    juce::String lastNoteText;
+    juce::String lastAnalyzeButtonText;
     bool lastPlayOriginalParam = false;
+    std::shared_ptr<const PitchAnalysisResult> displayedAnalysis;
 
     // The async callback keeps a shared owner until the native chooser
     // closes. A Component::SafePointer protects access to this editor.

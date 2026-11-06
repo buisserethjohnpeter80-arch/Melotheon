@@ -1,8 +1,8 @@
 #pragma once
 
-// MelotheonAudioProcessor - the VST3 audio processor (Phase 2).
+// MelotheonAudioProcessor - the VST3 audio processor (Phase 3A).
 //
-// Phase 2 adds the AUDIO FOUNDATION only:
+// The Phase 2 AUDIO FOUNDATION provides:
 //   * Live capture: host audio from the FL Studio Mixer Track is
 //     recorded into a preallocated 60 s buffer (AudioCaptureEngine).
 //   * Import: WAV / AIFF / FLAC (+ MP3 when JUCE enables it) files
@@ -13,9 +13,10 @@
 //   * Status: READY / LOADING / RECORDING / AUDIO READY / PLAYING /
 //     STOPPED / NO INPUT / ERROR / LIMIT REACHED / EMPTY SOURCE.
 //
-// What is still NOT here (Phase 3+): pitch detection, note
-// segmentation, MIDI generation, instrument playback, voice
-// multiplication, choir generation, AI. ANALYZE stays non-functional.
+// Phase 3A adds offline monophonic pitch detection on a worker thread.
+// ANALYZE publishes a 10 ms pitch/confidence curve to the editor.
+// What is still NOT here: note segmentation, MIDI generation,
+// instrument playback, voice multiplication, choir generation, AI.
 //
 // Thread safety: processBlock() never allocates, never locks, never
 // touches files or the UI, and never changes shared_ptr ownership. The
@@ -37,6 +38,7 @@
 #include "Audio/AudioCaptureEngine.h"
 #include "Audio/AudioFileLoader.h"
 #include "Audio/AudioPreviewEngine.h"
+#include "Analysis/PitchAnalysisEngine.h"
 
 class MelotheonAudioProcessor : public juce::AudioProcessor
 {
@@ -52,7 +54,10 @@ public:
         NoInput,
         Error,
         LimitReached,
-        EmptySource
+        EmptySource,
+        Analyzing,
+        AnalysisReady,
+        NoPitch
     };
 
     enum class InputSource
@@ -90,7 +95,7 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // ---- Phase 2 public API (editor + tests) ----
+    // ---- Audio + Phase 3A public API (editor + tests) ----
 
     InputSource getInputSource() const;
 
@@ -154,6 +159,27 @@ public:
     // worker thread; the result installs the clip or sets ERROR.
     void startFileImport (const juce::File& file);
 
+    // Offline monophonic pitch analysis. The worker consumes the
+    // immutable active clip and never touches processBlock(). Pressing
+    // Analyze while recording first finalizes the take. A second press
+    // cancels the current analysis.
+    bool startPitchAnalysis();
+    void cancelPitchAnalysis();
+    bool isPitchAnalyzing() const { return pitchAnalysisEngine.isRunning(); }
+    float getPitchAnalysisProgress() const { return pitchAnalysisEngine.getProgress(); }
+
+    // Message-thread access. analysisVersion increments when a result
+    // is cleared or published so the editor can update without polling
+    // the full vector.
+    std::shared_ptr<const PitchAnalysisResult> getPitchAnalysis() const
+    {
+        return pitchAnalysis;
+    }
+    int getPitchAnalysisVersion() const
+    {
+        return pitchAnalysisVersion.load (std::memory_order_acquire);
+    }
+
     // Keep the PLAY ORIGINAL toggle parameter in sync with preview
     // state. Message thread only.
     void setPlayOriginalParameter (bool shouldPlay);
@@ -167,6 +193,10 @@ private:
     // Install a finished clip as the active one (message thread).
     void installClip (std::shared_ptr<const AudioClip> clip, Status statusAfter);
 
+    // Cancel in-flight work and remove the curve associated with the
+    // previous clip. Message thread only.
+    void clearPitchAnalysis();
+
     // Stop capture, wait for the last audio-thread copy and publish a
     // non-empty take. Returns false for no active take or zero samples.
     bool finalizeCapture (Status statusAfter);
@@ -178,10 +208,13 @@ private:
     AudioCaptureEngine captureEngine;
     AudioPreviewEngine previewEngine;
     AudioFileLoader fileLoader;
+    PitchAnalysisEngine pitchAnalysisEngine;
 
     std::shared_ptr<const AudioClip> activeClip; // message-thread owner
+    std::shared_ptr<const PitchAnalysisResult> pitchAnalysis; // message-thread owner
     std::atomic<int> status { static_cast<int> (Status::Ready) };
     std::atomic<int> clipVersion { 0 };
+    std::atomic<int> pitchAnalysisVersion { 0 };
     std::atomic<float> inputPeakDb { -60.0f };
     std::atomic<float> inputRmsDb { -60.0f };
     std::atomic<double> hostSampleRate { 44100.0 };

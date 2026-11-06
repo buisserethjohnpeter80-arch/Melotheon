@@ -1,12 +1,13 @@
-// MelotheonAudioProcessorEditor implementation (Phase 2).
+// MelotheonAudioProcessorEditor implementation (Phase 3A).
 // See PluginEditor.h for the layout contract: Phase 1 interface with
-// the Phase 2 audio foundation wired in (record / import / preview /
-// meter / waveform / status). ANALYZE, SEND TO CHANNEL, DRAG MIDI TO
-// FL and PLAY INSTRUMENT are still non-functional.
+// the Phase 2 audio foundation plus offline monophonic pitch analysis.
+// SEND TO CHANNEL, DRAG MIDI TO FL and PLAY INSTRUMENT remain later work.
 
 #include "PluginEditor.h"
 
 #include "Audio/AudioFileLoader.h"
+
+#include <algorithm>
 
 namespace
 {
@@ -43,6 +44,19 @@ constexpr int kKnobCentres[] = { 108, 252, 397, 541, 686 };
 constexpr int kKeyX = 880, kKeyY = 468, kKeyW = 190, kKeyH = 44;
 constexpr int kAnalyzeX = 1095, kAnalyzeY = 468, kAnalyzeW = 140, kAnalyzeH = 44;
 constexpr int kSendX = 1245, kSendY = 468, kSendW = 145, kSendH = 44;
+
+juce::String formatPitchFrame (const PitchFrame& frame)
+{
+    static const char* noteNames[] = {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
+    const int midi = juce::roundToInt (frame.midiPitch);
+    const int pitchClass = ((midi % 12) + 12) % 12;
+    const int octave = midi / 12 - 1;
+    return juce::String (noteNames[pitchClass]) + juce::String (octave)
+         + "   " + juce::String (frame.frequencyHz, 1) + " Hz   "
+         + juce::String (juce::roundToInt (frame.confidence * 100.0f)) + "%";
+}
 } // namespace
 
 MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProcessor& processorToUse)
@@ -117,7 +131,9 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
     // and returns the cursor to the beginning.
     stopButton.onClick = [this]
     {
-        if (audioProcessor.isRecording())
+        if (audioProcessor.isPitchAnalyzing())
+            audioProcessor.cancelPitchAnalysis();
+        else if (audioProcessor.isRecording())
             audioProcessor.stopRecording();
         else
             audioProcessor.stopPreview();
@@ -138,7 +154,7 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
     addAndMakeVisible (noteLabel);
     styleLcdLabel (noteLabel);
-    noteLabel.setText ("A3   220.0 Hz", juce::dontSendNotification);
+    noteLabel.setText ("PITCH --", juce::dontSendNotification);
 
     // ---- Left capture panel ----
     addAndMakeVisible (liveInputLabel);
@@ -263,9 +279,20 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
     addAndMakeVisible (analyzeButton);
     styleTextButton (analyzeButton, Tokens::activeOrange, juce::Colours::black);
-    analyzeButton.onClick = []
+    analyzeButton.onClick = [this]
     {
-        // TODO: PHASE_3_AUDIO_LOGIC
+        if (audioProcessor.isPitchAnalyzing())
+        {
+            audioProcessor.cancelPitchAnalysis();
+            return;
+        }
+
+        if (audioProcessor.startPitchAnalysis())
+        {
+            recordButton.setToggleState (false, juce::dontSendNotification);
+            playButton.setToggleState (false, juce::dontSendNotification);
+            audioProcessor.setPlayOriginalParameter (false);
+        }
     };
 
     addAndMakeVisible (sendToChannelButton);
@@ -305,7 +332,7 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
         apvts, "midiChannel", midiChannelBox);
 
     updateKeyLabel();
-    // ~30 Hz: meter, playhead, status and clip polling.
+    // ~30 Hz: meter, playhead, status, analysis progress and clip polling.
     startTimer (33);
 
     setResizable (true, true);
@@ -445,7 +472,8 @@ void MelotheonAudioProcessorEditor::timerCallback()
     {
         lastStatusSeen = statusId;
         const bool isWarning = (status == MelotheonAudioProcessor::Status::Error
-                             || status == MelotheonAudioProcessor::Status::LimitReached);
+                             || status == MelotheonAudioProcessor::Status::LimitReached
+                             || status == MelotheonAudioProcessor::Status::NoPitch);
         statusLabel.setColour (juce::Label::textColourId,
                                isWarning ? Tokens::activeOrange : Tokens::statusGreen);
     }
@@ -460,6 +488,54 @@ void MelotheonAudioProcessorEditor::timerCallback()
     {
         lastClipVersionSeen = version;
         pitchEditor.setClip (audioProcessor.getActiveClip());
+    }
+
+    // ---- Pitch-analysis result and progress. ----
+    const int analysisVersion = audioProcessor.getPitchAnalysisVersion();
+    if (analysisVersion != lastAnalysisVersionSeen)
+    {
+        lastAnalysisVersionSeen = analysisVersion;
+        displayedAnalysis = audioProcessor.getPitchAnalysis();
+        pitchEditor.setPitchAnalysis (displayedAnalysis);
+    }
+
+    const bool analyzing = audioProcessor.isPitchAnalyzing();
+    const float analysisProgress = audioProcessor.getPitchAnalysisProgress();
+    pitchEditor.setAnalysisProgress (analyzing ? analysisProgress : -1.0f);
+
+    const juce::String analyzeText = analyzing
+        ? "CANCEL" : (displayedAnalysis != nullptr ? "RE-ANALYZE" : "ANALYZE");
+    if (analyzeText != lastAnalyzeButtonText)
+    {
+        lastAnalyzeButtonText = analyzeText;
+        analyzeButton.setButtonText (analyzeText);
+    }
+
+    juce::String noteText = "PITCH --";
+    if (analyzing)
+    {
+        noteText = "PITCH   "
+                 + juce::String (juce::roundToInt (analysisProgress * 100.0f)) + "%";
+    }
+    else if (displayedAnalysis != nullptr && displayedAnalysis->hasPitch())
+    {
+        const double position = audioProcessor.getPreviewPositionSeconds();
+        const PitchFrame* frame = displayedAnalysis->findNearestVoicedFrame (position);
+        if (frame == nullptr && position <= 0.001)
+        {
+            const auto found = std::find_if (
+                displayedAnalysis->frames.begin(), displayedAnalysis->frames.end(),
+                [] (const PitchFrame& candidate) { return candidate.voiced; });
+            if (found != displayedAnalysis->frames.end())
+                frame = &*found;
+        }
+        if (frame != nullptr)
+            noteText = formatPitchFrame (*frame);
+    }
+    if (noteText != lastNoteText)
+    {
+        lastNoteText = noteText;
+        noteLabel.setText (noteText, juce::dontSendNotification);
     }
 
     // ---- Playhead follows preview playback. ----

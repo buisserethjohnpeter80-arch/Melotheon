@@ -1,7 +1,7 @@
-// MelotheonAudioProcessor implementation (Phase 2).
-// See PluginProcessor.h for the contract: audio foundation only -
-// capture, import, preview, meter, status. No pitch detection, no
-// MIDI generation, no instrument playback.
+// MelotheonAudioProcessor implementation (Phase 3A).
+// The Phase 2 audio foundation remains real-time safe. Monophonic
+// pitch analysis is offline on a worker thread; MIDI and instrument
+// playback are not part of this phase.
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
@@ -19,6 +19,7 @@ MelotheonAudioProcessor::MelotheonAudioProcessor()
 MelotheonAudioProcessor::~MelotheonAudioProcessor()
 {
     aliveFlag->store (false, std::memory_order_release);
+    pitchAnalysisEngine.cancel();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout
@@ -43,9 +44,9 @@ MelotheonAudioProcessor::createParameterLayout()
         juce::ParameterID { "quantize", 1 }, "Quantize",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.8f));
 
-    // Left capture panel: noise gate knob + mono toggle.
-    // The noise gate is NOT applied to audio in Phase 2; the
-    // parameter is kept for future pitch-analysis preprocessing.
+    // Left capture panel: noise gate knob + mono toggle. Phase 3A uses
+    // the gate as the offline pitch detector's silence threshold; it
+    // never gates or modifies the preview audio.
     layout.add (std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "noiseGate", 1 }, "Noise Gate",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.3f));
@@ -160,7 +161,7 @@ void MelotheonAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     updateSilenceStatus (buffer.getNumSamples());
 }
 
-// ---- Phase 2 public API ----
+// ---- Audio + Phase 3A public API ----
 
 MelotheonAudioProcessor::InputSource MelotheonAudioProcessor::getInputSource() const
 {
@@ -182,6 +183,11 @@ juce::String MelotheonAudioProcessor::getStatusText() const
         case Status::Error:        return lastErrorMessage.isNotEmpty() ? lastErrorMessage : "ERROR";
         case Status::LimitReached: return "LIMIT REACHED";
         case Status::EmptySource:  return "EMPTY SOURCE";
+        case Status::Analyzing:
+            return "ANALYZING " + juce::String (juce::roundToInt (
+                pitchAnalysisEngine.getProgress() * 100.0f)) + "%";
+        case Status::AnalysisReady: return "PITCH READY";
+        case Status::NoPitch:       return "NO STABLE PITCH";
     }
     return "READY";
 }
@@ -200,6 +206,7 @@ bool MelotheonAudioProcessor::startRecording()
     fileLoader.cancelPendingLoad();
     previewEngine.stop();
     setPlayOriginalParameter (false);
+    clearPitchAnalysis();
 
     if (! captureEngine.startRecording())
         return false;
@@ -223,6 +230,11 @@ void MelotheonAudioProcessor::finalizeRecordingFromLimit()
 
 bool MelotheonAudioProcessor::startPreview()
 {
+    // Keep transport state deterministic: preview does not interrupt
+    // an analysis that the user explicitly started.
+    if (pitchAnalysisEngine.isRunning())
+        return false;
+
     // Play and Record are mutually exclusive. Pressing Play while a
     // take is active finalizes that take first, then previews it.
     if (captureEngine.isRecording() || captureEngine.limitReached())
@@ -277,6 +289,7 @@ void MelotheonAudioProcessor::startFileImport (const juce::File& file)
         finalizeCapture (Status::AudioReady);
     previewEngine.stop();
     setPlayOriginalParameter (false);
+    clearPitchAnalysis();
 
     setStatus (Status::Loading);
 
@@ -298,6 +311,62 @@ void MelotheonAudioProcessor::startFileImport (const juce::File& file)
         alive);
 }
 
+bool MelotheonAudioProcessor::startPitchAnalysis()
+{
+    // One click after recording is enough: finalize the current take
+    // before launching the worker.
+    if (captureEngine.isRecording() || captureEngine.limitReached())
+    {
+        if (! finalizeCapture (Status::AudioReady))
+            return false;
+    }
+
+    if (! hasActiveClip())
+    {
+        setStatus (Status::EmptySource);
+        return false;
+    }
+
+    fileLoader.cancelPendingLoad();
+    previewEngine.stop();
+    setPlayOriginalParameter (false);
+    clearPitchAnalysis();
+
+    PitchAnalysisSettings settings;
+    const float gate = apvts.getRawParameterValue ("noiseGate")->load();
+    const float sensitivity = apvts.getRawParameterValue ("sensitivity")->load();
+    settings.silenceThresholdDb = juce::jmap (
+        juce::jlimit (0.0f, 1.0f, gate), -72.0f, -35.0f);
+    // Higher sensitivity accepts less-periodic frames. Keep a floor so
+    // background noise cannot become a confident melody by itself.
+    settings.minimumConfidence = juce::jmap (
+        juce::jlimit (0.0f, 1.0f, sensitivity), 0.72f, 0.42f);
+
+    setStatus (Status::Analyzing);
+    auto alive = aliveFlag;
+    pitchAnalysisEngine.start (
+        activeClip, settings,
+        [this, alive] (std::shared_ptr<const PitchAnalysisResult> result)
+        {
+            if (! alive->load (std::memory_order_acquire) || result == nullptr)
+                return;
+
+            pitchAnalysis = std::move (result);
+            pitchAnalysisVersion.fetch_add (1, std::memory_order_acq_rel);
+            setStatus (pitchAnalysis->hasPitch() ? Status::AnalysisReady
+                                                 : Status::NoPitch);
+        },
+        alive);
+    return true;
+}
+
+void MelotheonAudioProcessor::cancelPitchAnalysis()
+{
+    pitchAnalysisEngine.cancel();
+    if (getStatus() == Status::Analyzing)
+        setStatus (hasActiveClip() ? Status::AudioReady : Status::Ready);
+}
+
 void MelotheonAudioProcessor::setPlayOriginalParameter (bool shouldPlay)
 {
     if (auto* param = apvts.getParameter ("playOriginal"); param != nullptr)
@@ -313,10 +382,21 @@ void MelotheonAudioProcessor::installClip (std::shared_ptr<const AudioClip> clip
         return;
     }
 
+    clearPitchAnalysis();
     previewEngine.setClip (clip);
     activeClip = std::move (clip);
     clipVersion.fetch_add (1, std::memory_order_acq_rel);
     setStatus (statusAfter);
+}
+
+void MelotheonAudioProcessor::clearPitchAnalysis()
+{
+    pitchAnalysisEngine.cancel();
+    if (pitchAnalysis != nullptr)
+    {
+        pitchAnalysis.reset();
+        pitchAnalysisVersion.fetch_add (1, std::memory_order_acq_rel);
+    }
 }
 
 bool MelotheonAudioProcessor::finalizeCapture (Status statusAfter)

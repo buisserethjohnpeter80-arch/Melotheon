@@ -11,11 +11,10 @@
 #   cmake --build build --config Release
 # The .vst3 bundle lands under build/Melotheon_artefacts/Release/VST3/.
 #
-# Phase 2 scope: audio foundation (capture, import, preview, meter,
-# status, real waveform) on top of the Phase 1 interface. Still no
-# pitch detection, no MIDI generation, no instrument hosting
-# (see README.md). The processor passes audio through unchanged while
-# preview is inactive.
+# Phase 3A scope: the Phase 2 audio foundation plus offline monophonic
+# pitch tracking and a real pitch curve. Note segmentation, MIDI
+# generation and instrument hosting remain later phases (see README.md).
+# The processor passes audio through unchanged while preview is inactive.
 
 cmake_minimum_required(VERSION 3.22)
 
@@ -66,6 +65,8 @@ target_sources(Melotheon
         Source/Audio/AudioCaptureEngine.cpp
         Source/Audio/AudioFileLoader.cpp
         Source/Audio/AudioPreviewEngine.cpp
+        Source/Analysis/MonophonicPitchAnalyzer.cpp
+        Source/Analysis/PitchAnalysisEngine.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp
@@ -105,11 +106,12 @@ target_link_libraries(Melotheon
         juce::juce_recommended_warning_flags
 )
 
-# ---- Phase 2.1 unit tests (console app, no GUI, no host) ----
-# Covers the audio foundation: stereo-to-mono conversion, mono copy,
+# ---- Phase 3A unit tests (console app, no GUI, no host) ----
+# Covers the audio foundation: adaptive stereo-to-mono conversion, mono copy,
 # capture limits / state transitions, preview state transitions and
 # resampling, file-loader rejection + valid WAV round-trip, AudioClip
-# metadata, and processor pass-through. The test target is built by
+# metadata, processor pass-through, and monophonic pitch tracking at
+# several source rates. The test target is built by
 # the normal build (including Windows CI) so a broken test breaks
 # the build. Windows CI also executes it and validates the final VST3
 # bundle with pluginval. Run locally with
@@ -129,6 +131,8 @@ target_sources(MelotheonTests
         Source/Audio/AudioCaptureEngine.cpp
         Source/Audio/AudioFileLoader.cpp
         Source/Audio/AudioPreviewEngine.cpp
+        Source/Analysis/MonophonicPitchAnalyzer.cpp
+        Source/Analysis/PitchAnalysisEngine.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp

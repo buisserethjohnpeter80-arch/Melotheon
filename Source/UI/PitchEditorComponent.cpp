@@ -1,6 +1,7 @@
 // PitchEditorComponent implementation. All drawing is proportional to
 // the component bounds, so the editor stays aligned when resized.
-// Static placeholder data only - see the header.
+// Phase 3A adds a real confidence-weighted pitch curve while keeping
+// the Phase 1 placeholder for an empty plugin instance.
 
 #include "PitchEditorComponent.h"
 #include "MelotheonLookAndFeel.h"
@@ -38,8 +39,31 @@ juce::String PitchEditorComponent::noteName (int midiNote) const
 void PitchEditorComponent::setClip (std::shared_ptr<const AudioClip> clip)
 {
     activeClip = std::move (clip);
+    pitchAnalysis.reset();
+    analysisProgress = -1.0f;
     rebuildWaveformCache();
     playheadSeconds = (activeClip != nullptr) ? 0.0 : -1.0;
+    repaint();
+}
+
+void PitchEditorComponent::setPitchAnalysis (
+    std::shared_ptr<const PitchAnalysisResult> analysis)
+{
+    pitchAnalysis = std::move (analysis);
+    analysisProgress = -1.0f;
+    repaint();
+}
+
+void PitchEditorComponent::setAnalysisProgress (float progress)
+{
+    const float next = progress < 0.0f ? -1.0f : juce::jlimit (0.0f, 1.0f, progress);
+    const int oldPercent = analysisProgress < 0.0f
+        ? -1 : juce::roundToInt (analysisProgress * 100.0f);
+    const int newPercent = next < 0.0f ? -1 : juce::roundToInt (next * 100.0f);
+    if (oldPercent == newPercent)
+        return;
+
+    analysisProgress = next;
     repaint();
 }
 
@@ -98,6 +122,34 @@ void PitchEditorComponent::rebuildWaveformCache()
     }
 }
 
+std::pair<int, int> PitchEditorComponent::visibleMidiRange() const
+{
+    if (pitchAnalysis == nullptr || ! pitchAnalysis->hasPitch())
+        return { defaultLowestMidi, defaultHighestMidi };
+
+    int low = static_cast<int> (std::floor (pitchAnalysis->minMidi)) - 3;
+    int high = static_cast<int> (std::ceil (pitchAnalysis->maxMidi)) + 3;
+    low = juce::jlimit (24, 108, low);
+    high = juce::jlimit (24, 108, high);
+
+    // Always show at least two octaves and align the outer bounds to C
+    // where possible, so the keyboard remains easy to read.
+    if (high - low < 24)
+    {
+        const int missing = 24 - (high - low);
+        low -= missing / 2;
+        high += missing - missing / 2;
+    }
+    low = juce::jlimit (24, 84, low);
+    high = juce::jlimit (low + 24, 108, high);
+    low = juce::jmax (24, (low / 12) * 12);
+    high = juce::jmin (108, ((high + 11) / 12) * 12);
+    if (high - low < 24)
+        high = juce::jmin (108, low + 24);
+
+    return { low, high };
+}
+
 void PitchEditorComponent::paint (juce::Graphics& g)
 {
     using namespace melotheon;
@@ -111,14 +163,15 @@ void PitchEditorComponent::paint (juce::Graphics& g)
     const float gridY = barNumberHeight;
     const float gridW = width - keyboardWidth;
     const float gridH = height - barNumberHeight;
-    const int numRows = highestMidi - lowestMidi + 1; // 25 semitones
+    const auto [lowestMidi, highestMidi] = visibleMidiRange();
+    const int numRows = highestMidi - lowestMidi + 1;
     const float rowH = gridH / static_cast<float> (numRows);
     const float beatW = gridW / static_cast<float> (totalBeats);
 
-    auto midiToY = [&] (int midiNote) -> float
+    auto midiToY = [&] (float midiNote) -> float
     {
         // Higher notes are higher on screen.
-        return gridY + static_cast<float> (highestMidi - midiNote) * rowH;
+        return gridY + (static_cast<float> (highestMidi) - midiNote) * rowH;
     };
     auto beatToX = [&] (double beat) -> float
     {
@@ -137,13 +190,15 @@ void PitchEditorComponent::paint (juce::Graphics& g)
     }
 
     // ---- Horizontal semitone lines; stronger lines on C (octaves). ----
-    for (int midi = lowestMidi; midi <= highestMidi + 1; ++midi)
+    for (int midi = lowestMidi; midi <= highestMidi; ++midi)
     {
         const float y = midiToY (midi);
         const bool isOctave = (midi % 12 == 0);
         g.setColour (isOctave ? Tokens::border.withAlpha (0.8f) : Tokens::gridLine);
         g.drawLine (gridX, y, width, y, isOctave ? 1.0f : 0.5f);
     }
+    g.setColour (Tokens::border.withAlpha (0.8f));
+    g.drawLine (gridX, height, width, height, 1.0f);
 
     // ---- Vertical beat lines; stronger lines on bar starts. ----
     for (int beat = 0; beat <= totalBeats; ++beat)
@@ -177,12 +232,57 @@ void PitchEditorComponent::paint (juce::Graphics& g)
             }
         }
 
-        // ---- Centered message: no pitch analysis has happened yet. ----
-        g.setFont (melotheonFont (13.0f, true));
-        g.setColour (Tokens::secondaryText);
-        g.drawText ("AUDIO READY \xC2\xB7 CLICK ANALYZE",
-                    juce::Rectangle<float> (gridX, gridY, gridW, gridH),
-                    juce::Justification::centred, true);
+        // ---- Real Phase 3A pitch curve. ----
+        // Each adjacent voiced frame becomes one orange segment. The
+        // alpha follows detector confidence, so uncertain edges stay
+        // visible without looking as authoritative as stable pitch.
+        if (pitchAnalysis != nullptr && pitchAnalysis->hasPitch()
+            && activeClip->durationSeconds > 0.0)
+        {
+            const auto& frames = pitchAnalysis->frames;
+            for (size_t i = 1; i < frames.size(); ++i)
+            {
+                const auto& previous = frames[i - 1];
+                const auto& current = frames[i];
+                if (! previous.voiced || ! current.voiced)
+                    continue;
+                if (current.timeSeconds - previous.timeSeconds
+                    > pitchAnalysis->hopSeconds * 1.75)
+                    continue;
+
+                const float x1 = gridX + static_cast<float> (
+                    juce::jlimit (0.0, activeClip->durationSeconds, previous.timeSeconds)
+                    / activeClip->durationSeconds) * gridW;
+                const float x2 = gridX + static_cast<float> (
+                    juce::jlimit (0.0, activeClip->durationSeconds, current.timeSeconds)
+                    / activeClip->durationSeconds) * gridW;
+                const float y1 = midiToY (previous.midiPitch) + rowH * 0.5f;
+                const float y2 = midiToY (current.midiPitch) + rowH * 0.5f;
+                const float confidence = juce::jlimit (
+                    0.0f, 1.0f, 0.5f * (previous.confidence + current.confidence));
+
+                g.setColour (Tokens::brightOrange.withAlpha (0.35f + confidence * 0.65f));
+                g.drawLine (x1, y1, x2, y2, 1.3f + confidence * 0.9f);
+            }
+        }
+        else
+        {
+            g.setFont (melotheonFont (13.0f, true));
+            g.setColour (pitchAnalysis != nullptr
+                             ? Tokens::activeOrange : Tokens::secondaryText);
+            juce::String message;
+            if (analysisProgress >= 0.0f)
+                message = "ANALYZING "
+                        + juce::String (juce::roundToInt (analysisProgress * 100.0f)) + "%";
+            else if (pitchAnalysis != nullptr)
+                message = "NO STABLE PITCH FOUND";
+            else
+                message = "AUDIO READY \xC2\xB7 CLICK ANALYZE";
+
+            g.drawText (message,
+                        juce::Rectangle<float> (gridX, gridY, gridW, gridH),
+                        juce::Justification::centred, true);
+        }
     }
     else
     {
@@ -325,10 +425,12 @@ void PitchEditorComponent::paint (juce::Graphics& g)
             g.setColour (juce::Colour (0xff1a1a1a));
             g.fillRect (0.0f, y, keyboardWidth * 0.62f, rowH);
         }
-        // C3 / C4 / C5 labels on the white C keys.
+        // Label every visible C key. The range remains C3-C5 until a
+        // real result needs a lower or higher register.
         g.setFont (melotheonFont (11.0f, true));
         g.setColour (juce::Colour (0xff333333));
-        for (int midi : { 48, 60, 72 })
+        const int firstC = ((lowestMidi + 11) / 12) * 12;
+        for (int midi = firstC; midi <= highestMidi; midi += 12)
         {
             const float y = midiToY (midi);
             g.drawText (noteName (midi),

@@ -25,7 +25,7 @@ Every control is a real JUCE component. Knobs are draggable, dropdowns
 open with placeholder choices, and Record / Play / Stop change their
 visual selected state only.
 
-## Phase 2.1 — stable audio foundation (current)
+## Phase 2.1 — stable audio foundation (complete)
 
 Phase 2 connects the audio foundation to the Phase 1 interface, with
 no change to the layout, colours, sizes or brand text:
@@ -50,7 +50,7 @@ no change to the layout, colours, sizes or brand text:
   (play the loaded file / recorded clip).
 
 The active clip is an immutable `AudioClip` (original channels kept
-for preview, separate mono copy for future analysis). Ownership stays
+for preview, separate cancellation-safe mono copy for analysis). Ownership stays
 on the message thread. The audio callback reads a stable non-owning
 pointer, so `processBlock()` never performs shared-pointer reference
 counting or destruction.
@@ -65,14 +65,41 @@ Phase 2.1 also hardens the working foundation:
 - Closing the editor while the file chooser is open is safe.
 - A pending import cannot replace a clip after Record or Play takes over.
 
+## Phase 3A — monophonic pitch map (current)
+
+ANALYZE now performs real offline pitch tracking without changing the
+approved interface layout:
+
+- Voice, whistle, solo guitar and other one-note-at-a-time sources.
+- 55–2500 Hz working range, 24 kHz internal analysis rate and one
+  pitch/confidence frame every 10 ms.
+- Two-resolution YIN tracking: a longer low-frequency window plus a
+  short high-frequency window, harmonic selection and light glitch
+  stabilization.
+- Analysis runs on a cancellable worker thread. FL Studio's audio
+  callback and the plugin UI remain responsive.
+- The central editor overlays the real pitch curve on the waveform.
+  Its orange opacity reflects confidence and its keyboard range adapts
+  to the detected register.
+- The header shows the current note, Hertz and confidence while the
+  original clip plays. ANALYZING progress and NO STABLE PITCH are
+  explicit states.
+- Strong anti-phase stereo inputs cannot erase the analysis signal:
+  Melotheon selects the safer source channel while preserving the
+  original stereo audio for preview.
+
+Phase 3A intentionally produces a continuous pitch map, not editable
+notes or MIDI. That separation lets the detector be validated before
+note boundaries and MIDI timing are added.
+
 ## What is NOT implemented yet
 
-- Pitch detection, audio analysis, MIDI generation.
+- Note segmentation, editable note blocks and MIDI generation/export.
 - Instrument hosting, choir generation, voice multiplication.
 - AI / ONNX models.
 - Real Send to Channel / Drag MIDI behaviour.
-- ANALYZE, SEND TO CHANNEL, DRAG MIDI TO FL and PLAY INSTRUMENT
-  are still non-functional.
+- SEND TO CHANNEL, DRAG MIDI TO FL and PLAY INSTRUMENT are still
+  non-functional.
 
 These are marked `// TODO: PHASE_3_AUDIO_LOGIC` in the code.
 
@@ -95,7 +122,7 @@ The `.vst3` bundle lands under
 (usually `C:\Program Files\Common Files\VST3\`) and rescan plugins in
 FL Studio.
 
-Run the Phase 2.1 unit tests after any build:
+Run the Phase 3A unit tests after any build:
 
 ```bat
 ctest --test-dir build -C Release --output-on-failure

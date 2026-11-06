@@ -8,11 +8,10 @@
 // data - a fixed monophonic melody, a subtle grey waveform behind
 // the notes and one green playhead.
 //
-// After a clip is loaded (Phase 2): the placeholder notes and pitch
-// curve are hidden (no pitch analysis has happened yet). The real
-// waveform of the active clip is drawn from a cached min/max peak
-// table, the green playhead follows preview playback, and a small
-// centered message reads "AUDIO READY · CLICK ANALYZE".
+// After a clip is loaded: the real waveform is drawn from a cached
+// min/max peak table. Phase 3A overlays the real monophonic pitch
+// curve with confidence-dependent orange segments. It does not draw
+// note blocks because note segmentation belongs to Phase 3B.
 //
 // Layout: piano keyboard on the left (C3 at the bottom, C5 at the
 // top), bar numbers 1-4 across the top, 4 bars of 4 beats each.
@@ -24,6 +23,7 @@
 #include <vector>
 
 #include "../Audio/AudioClip.h"
+#include "../Analysis/PitchAnalysis.h"
 
 class PitchEditorComponent : public juce::Component
 {
@@ -34,6 +34,15 @@ public:
     // placeholder view. The waveform peak cache is rebuilt here, so
     // paint() never scans audio.
     void setClip (std::shared_ptr<const AudioClip> clip);
+
+    // Install/clear the immutable worker result. The pitch range is
+    // fitted automatically while preserving the same piano-roll style.
+    void setPitchAnalysis (std::shared_ptr<const PitchAnalysisResult> analysis);
+
+    // 0..1 while the worker is active, negative when idle. This only
+    // changes the centered helper text; progress also appears in the
+    // header LCD.
+    void setAnalysisProgress (float progress);
 
     // Preview playhead position in seconds. Only used while a clip
     // is loaded; negative values restore the static placeholder
@@ -55,8 +64,8 @@ private:
     static const Note placeholderNotes[];
     static constexpr int numPlaceholderNotes = 12;
 
-    static constexpr int lowestMidi = 48; // C3
-    static constexpr int highestMidi = 72; // C5
+    static constexpr int defaultLowestMidi = 48; // C3
+    static constexpr int defaultHighestMidi = 72; // C5
     static constexpr int totalBeats = 16; // 4 bars x 4 beats
     static constexpr int beatsPerBar = 4;
     static constexpr float keyboardWidth = 70.0f;
@@ -71,8 +80,11 @@ private:
 
     bool isBlackKey (int midiNote) const;
     juce::String noteName (int midiNote) const;
+    std::pair<int, int> visibleMidiRange() const;
 
     std::shared_ptr<const AudioClip> activeClip;
+    std::shared_ptr<const PitchAnalysisResult> pitchAnalysis;
     std::vector<std::pair<float, float>> waveformPeaks;
     double playheadSeconds = -1.0;
+    float analysisProgress = -1.0f;
 };

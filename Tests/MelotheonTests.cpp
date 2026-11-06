@@ -1,4 +1,4 @@
-// Melotheon Phase 2.1 unit tests.
+// Melotheon Phase 3A unit tests.
 //
 // Console app, no GUI, no host, no MessageManager: every test calls
 // the audio-foundation classes (and the processor) directly. The
@@ -13,6 +13,7 @@
 #include "Audio/AudioClip.h"
 #include "Audio/AudioFileLoader.h"
 #include "Audio/AudioPreviewEngine.h"
+#include "Analysis/MonophonicPitchAnalyzer.h"
 #include "PluginProcessor.h"
 
 #include <cmath>
@@ -54,7 +55,7 @@ void testStereoToMono()
     source.getWritePointer (1)[0] = 0.2f;
     source.getWritePointer (1)[1] = 0.4f;
     source.getWritePointer (1)[2] = 0.0f;
-    source.getWritePointer (1)[3] = -1.0f;
+    source.getWritePointer (1)[3] = 0.5f;
 
     juce::AudioBuffer<float> mono;
     AudioClip::buildMonoBuffer (source, mono);
@@ -64,7 +65,27 @@ void testStereoToMono()
     CHECK_NEAR (mono.getReadPointer (0)[0], 0.4f, 1e-6f);  // 0.5 * (0.6 + 0.2)
     CHECK_NEAR (mono.getReadPointer (0)[1], 0.1f, 1e-6f);  // 0.5 * (-0.2 + 0.4)
     CHECK_NEAR (mono.getReadPointer (0)[2], 0.0f, 1e-6f);
-    CHECK_NEAR (mono.getReadPointer (0)[3], 0.0f, 1e-6f);  // 0.5 * (1.0 + -1.0)
+    CHECK_NEAR (mono.getReadPointer (0)[3], 0.75f, 1e-6f); // 0.5 * (1.0 + 0.5)
+}
+
+void testStereoPhaseCancellationProtection()
+{
+    juce::AudioBuffer<float> source (2, 32);
+    for (int i = 0; i < source.getNumSamples(); ++i)
+    {
+        const float sample = std::sin (2.0f * 3.14159265f
+                                       * static_cast<float> (i) / 8.0f);
+        source.getWritePointer (0)[i] = sample;
+        source.getWritePointer (1)[i] = -sample;
+    }
+
+    juce::AudioBuffer<float> mono;
+    AudioClip::buildMonoBuffer (source, mono);
+
+    // A normal L+R average would be complete silence. Phase 3A keeps
+    // one channel for analysis while preview remains original stereo.
+    for (int i = 0; i < source.getNumSamples(); ++i)
+        CHECK_NEAR (mono.getReadPointer (0)[i], source.getReadPointer (0)[i], 1e-6f);
 }
 
 void testMonoCopy()
@@ -367,6 +388,107 @@ void testFileLoaderValidWav()
     CHECK (result.clip->sourceName == "valid.wav");
     // 16-bit quantization: the round-trip is approximate.
     CHECK_NEAR (result.clip->previewBuffer.getReadPointer (0)[441], source.getReadPointer (0)[441], 0.001f);
+    CHECK (result.clip->analysisMonoBuffer.getMagnitude (0, 0, 44100) > 0.4f);
+}
+
+// ---- Phase 3A: offline monophonic pitch analysis ----
+
+juce::AudioBuffer<float> makeSine (double sampleRate, double durationSeconds,
+                                   float frequency, float amplitude = 0.5f)
+{
+    const int samples = static_cast<int> (std::llround (sampleRate * durationSeconds));
+    juce::AudioBuffer<float> buffer (1, samples);
+    for (int i = 0; i < samples; ++i)
+        buffer.getWritePointer (0)[i] = amplitude * std::sin (
+            2.0f * 3.14159265f * frequency * static_cast<float> (i)
+            / static_cast<float> (sampleRate));
+    return buffer;
+}
+
+void testPitchAnalysisAtSourceRates()
+{
+    for (double sampleRate : { 44100.0, 48000.0, 96000.0 })
+    {
+        auto sine = makeSine (sampleRate, 0.6, 440.0f);
+        auto result = MonophonicPitchAnalyzer::analyze (sine, sampleRate);
+
+        CHECK (result != nullptr);
+        if (result == nullptr)
+            continue;
+        CHECK (result->hasPitch());
+        CHECK (result->voicedFrameCount > 35);
+        CHECK_NEAR (result->medianFrequencyHz, 440.0f, 3.0f);
+        CHECK (result->medianConfidence > 0.75f);
+        CHECK_NEAR ((float) result->hopSeconds, 0.01f, 1e-6f);
+    }
+}
+
+void testLowAndHighPitchAnalysis()
+{
+    auto lowSine = makeSine (48000.0, 0.7, 110.0f);
+    auto low = MonophonicPitchAnalyzer::analyze (lowSine, 48000.0);
+    CHECK (low != nullptr);
+    CHECK (low != nullptr && low->hasPitch());
+    if (low != nullptr && low->hasPitch())
+        CHECK_NEAR (low->medianFrequencyHz, 110.0f, 2.0f);
+
+    auto whistleSine = makeSine (48000.0, 0.5, 1200.0f, 0.35f);
+    auto whistle = MonophonicPitchAnalyzer::analyze (whistleSine, 48000.0);
+    CHECK (whistle != nullptr);
+    CHECK (whistle != nullptr && whistle->hasPitch());
+    if (whistle != nullptr && whistle->hasPitch())
+        CHECK_NEAR (whistle->medianFrequencyHz, 1200.0f, 12.0f);
+}
+
+void testPitchAnalysisSilenceAndCancellation()
+{
+    juce::AudioBuffer<float> silence (1, 24000);
+    silence.clear();
+    auto result = MonophonicPitchAnalyzer::analyze (silence, 24000.0);
+    CHECK (result != nullptr);
+    CHECK (result != nullptr && ! result->hasPitch());
+    CHECK (result != nullptr && result->voicedFrameCount == 0);
+
+    auto sine = makeSine (44100.0, 0.5, 220.0f);
+    auto cancelled = MonophonicPitchAnalyzer::analyze (
+        sine, 44100.0, {}, [] { return true; });
+    CHECK (cancelled == nullptr);
+}
+
+void testPitchCurveFollowsTwoTones()
+{
+    constexpr double sampleRate = 48000.0;
+    juce::AudioBuffer<float> source (1, static_cast<int> (sampleRate));
+    source.clear();
+    for (int i = 0; i < source.getNumSamples(); ++i)
+    {
+        const double time = static_cast<double> (i) / sampleRate;
+        float frequency = 0.0f;
+        if (time < 0.35)
+            frequency = 220.0f;
+        else if (time >= 0.50 && time < 0.90)
+            frequency = 440.0f;
+        if (frequency > 0.0f)
+            source.getWritePointer (0)[i] = 0.45f * std::sin (
+                2.0f * 3.14159265f * frequency * static_cast<float> (time));
+    }
+
+    auto result = MonophonicPitchAnalyzer::analyze (source, sampleRate);
+    CHECK (result != nullptr);
+    CHECK (result != nullptr && result->hasPitch());
+    if (result == nullptr)
+        return;
+
+    const PitchFrame* first = result->findNearestVoicedFrame (0.20);
+    const PitchFrame* second = result->findNearestVoicedFrame (0.70);
+    CHECK (first != nullptr);
+    CHECK (second != nullptr);
+    if (first != nullptr)
+        CHECK_NEAR (first->frequencyHz, 220.0f, 5.0f);
+    if (second != nullptr)
+        CHECK_NEAR (second->frequencyHz, 440.0f, 7.0f);
+
+    CHECK (result->findNearestVoicedFrame (0.425, 0.03) == nullptr);
 }
 
 // ---- Processor: pass-through, meter, record -> preview loop ----
@@ -518,6 +640,7 @@ void testProcessorTransportExclusion()
 int main()
 {
     testStereoToMono();
+    testStereoPhaseCancellationProtection();
     testMonoCopy();
     testAudioClipMetadata();
     testCaptureStateTransitions();
@@ -526,6 +649,10 @@ int main()
     testPreviewResampling();
     testFileLoaderRejection();
     testFileLoaderValidWav();
+    testPitchAnalysisAtSourceRates();
+    testLowAndHighPitchAnalysis();
+    testPitchAnalysisSilenceAndCancellation();
+    testPitchCurveFollowsTwoTones();
     testProcessorPassThrough();
     testProcessorRecordAndPreview();
     testProcessorEmptyTake();
@@ -534,7 +661,7 @@ int main()
     // Clean up the temp files.
     getTestDir().deleteRecursively();
 
-    std::cout << "Melotheon Phase 2.1 tests: " << (checks - failures) << "/" << checks
+    std::cout << "Melotheon Phase 3A tests: " << (checks - failures) << "/" << checks
               << " checks passed";
     if (failures == 0)
         std::cout << " - ALL GREEN\n";
