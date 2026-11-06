@@ -1,9 +1,12 @@
-// MelotheonAudioProcessor implementation (Phase 1).
-// See PluginProcessor.h for the contract: audio passes through
-// unchanged; parameters exist for editor state only.
+// MelotheonAudioProcessor implementation (Phase 2).
+// See PluginProcessor.h for the contract: audio foundation only -
+// capture, import, preview, meter, status. No pitch detection, no
+// MIDI generation, no instrument playback.
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+
+#include <cmath>
 
 MelotheonAudioProcessor::MelotheonAudioProcessor()
     : AudioProcessor (BusesProperties()
@@ -13,7 +16,10 @@ MelotheonAudioProcessor::MelotheonAudioProcessor()
 {
 }
 
-MelotheonAudioProcessor::~MelotheonAudioProcessor() = default;
+MelotheonAudioProcessor::~MelotheonAudioProcessor()
+{
+    aliveFlag->store (false, std::memory_order_release);
+}
 
 juce::AudioProcessorValueTreeState::ParameterLayout
 MelotheonAudioProcessor::createParameterLayout()
@@ -38,6 +44,8 @@ MelotheonAudioProcessor::createParameterLayout()
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.8f));
 
     // Left capture panel: noise gate knob + mono toggle.
+    // The noise gate is NOT applied to audio in Phase 2; the
+    // parameter is kept for future pitch-analysis preprocessing.
     layout.add (std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "noiseGate", 1 }, "Noise Gate",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.3f));
@@ -64,11 +72,13 @@ MelotheonAudioProcessor::createParameterLayout()
                             "Phrygian", "Lydian" },
         1));
 
-    // Header input source, right-panel instrument and MIDI channel.
+    // Header input source: Phase 2 has exactly two sources.
+    // LIVE INPUT captures host audio; IMPORTED AUDIO plays the loaded
+    // file / recorded clip. (Phase 1 had VOICE / GUITAR / PIANO /
+    // LINE here; those were labels only, never audio routings.)
     layout.add (std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID { "inputSource", 1 }, "Input Source",
-        juce::StringArray { "INPUT: VOICE", "INPUT: GUITAR",
-                            "INPUT: PIANO", "INPUT: LINE" },
+        juce::StringArray { "LIVE INPUT", "IMPORTED AUDIO" },
         0));
     layout.add (std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID { "instrumentTarget", 1 }, "Instrument",
@@ -88,14 +98,31 @@ MelotheonAudioProcessor::createParameterLayout()
     return layout;
 }
 
-void MelotheonAudioProcessor::prepareToPlay (double /*sampleRate*/, int /*samplesPerBlock*/)
+void MelotheonAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Phase 1: nothing to prepare - no DSP state exists.
+    juce::ignoreUnused (samplesPerBlock);
+
+    hostSampleRate.store (sampleRate > 0.0 ? sampleRate : 44100.0,
+                          std::memory_order_release);
+
+    const int numChannels = juce::jlimit (1, 2, getTotalNumInputChannels());
+    captureEngine.prepare (hostSampleRate.load (std::memory_order_acquire), numChannels);
+    previewEngine.stop();
+
+    meterPeakLinear = 0.0f;
+    meterRmsLinear = 0.0f;
+    silentSamples = 0;
+
+    // A re-prepare aborts any take in progress (its partial capture
+    // is discarded by captureEngine.prepare()).
+    if (getStatus() == Status::Recording)
+        setStatus (Status::Ready);
 }
 
 void MelotheonAudioProcessor::releaseResources()
 {
-    // Phase 1: nothing to release.
+    previewEngine.stop();
+    captureEngine.stopRecording(); // discard any unfinalized take
 }
 
 bool MelotheonAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -113,14 +140,238 @@ void MelotheonAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                             juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
-    juce::ignoreUnused (buffer);
     midiMessages.clear();
 
-    // Pass-through: the buffer is processed in place by the host, so
-    // untouched audio flows through the Mixer Track unchanged. Phase 1
-    // has no DSP: nothing here reads or writes audio samples.
-    // TODO: PHASE_2_AUDIO_LOGIC - pitch detection, analysis and MIDI
-    // generation will read the buffer here in a later phase.
+    // 1. Input meter reads the incoming host audio (before any
+    // preview overwrites the buffer).
+    updateInputMeter (buffer);
+
+    // 2. Live capture (copies input, no allocation).
+    captureEngine.processInput (buffer);
+    if (captureEngine.limitReached())
+        setStatus (Status::LimitReached);
+
+    // 3. Original-audio preview replaces the pass-through while it
+    // plays; otherwise the Mixer Track input flows through unchanged.
+    if (previewEngine.isPlaying())
+        previewEngine.render (buffer, hostSampleRate.load (std::memory_order_acquire));
+
+    // 4. READY <-> NO INPUT transitions (only from those states).
+    updateSilenceStatus (buffer.getNumSamples());
+}
+
+// ---- Phase 2 public API ----
+
+MelotheonAudioProcessor::InputSource MelotheonAudioProcessor::getInputSource() const
+{
+    const float value = apvts.getRawParameterValue ("inputSource")->load();
+    return static_cast<int> (value + 0.5f) == 0 ? InputSource::Live : InputSource::Imported;
+}
+
+juce::String MelotheonAudioProcessor::getStatusText() const
+{
+    switch (getStatus())
+    {
+        case Status::Ready:        return "READY";
+        case Status::Loading:      return "LOADING";
+        case Status::Recording:    return "RECORDING";
+        case Status::AudioReady:   return "AUDIO READY";
+        case Status::Playing:      return "PLAYING";
+        case Status::Stopped:      return "STOPPED";
+        case Status::NoInput:      return "NO INPUT";
+        case Status::Error:        return lastErrorMessage.isNotEmpty() ? lastErrorMessage : "ERROR";
+        case Status::LimitReached: return "LIMIT REACHED";
+        case Status::EmptySource:  return "EMPTY SOURCE";
+    }
+    return "READY";
+}
+
+bool MelotheonAudioProcessor::startRecording()
+{
+    if (getInputSource() != InputSource::Live)
+    {
+        lastErrorMessage = "USE LIVE INPUT";
+        setStatus (Status::Error);
+        return false;
+    }
+    if (! captureEngine.startRecording())
+        return false;
+
+    setStatus (Status::Recording);
+    return true;
+}
+
+void MelotheonAudioProcessor::stopRecording()
+{
+    if (captureEngine.stopRecording() < 0)
+        return; // nothing was recording
+
+    auto clip = captureEngine.createClip ("LIVE RECORDING");
+    installClip (clip, Status::AudioReady);
+}
+
+void MelotheonAudioProcessor::finalizeRecordingFromLimit()
+{
+    if (! captureEngine.limitReached())
+        return;
+
+    const int recorded = captureEngine.stopRecording();
+    if (recorded < 0)
+    {
+        captureEngine.clearLimitFlag();
+        return;
+    }
+
+    auto clip = captureEngine.createClip ("LIVE RECORDING");
+    captureEngine.clearLimitFlag();
+    installClip (clip, Status::LimitReached);
+}
+
+bool MelotheonAudioProcessor::startPreview()
+{
+    if (! hasActiveClip())
+    {
+        setStatus (Status::EmptySource);
+        return false;
+    }
+    if (previewEngine.start())
+    {
+        setStatus (Status::Playing);
+        return true;
+    }
+
+    setStatus (Status::EmptySource);
+    return false;
+}
+
+void MelotheonAudioProcessor::stopPreview()
+{
+    previewEngine.stop();
+    setStatus (Status::Stopped);
+}
+
+void MelotheonAudioProcessor::pausePreview()
+{
+    previewEngine.pause();
+    setStatus (Status::Stopped);
+}
+
+void MelotheonAudioProcessor::startFileImport (const juce::File& file)
+{
+    if (! file.existsAsFile())
+    {
+        lastErrorMessage = "FILE NOT FOUND";
+        setStatus (Status::Error);
+        return;
+    }
+
+    setStatus (Status::Loading);
+
+    auto alive = aliveFlag;
+    fileLoader.loadFileAsync (file,
+        [this, alive] (AudioFileLoader::Result result)
+        {
+            if (! alive->load (std::memory_order_acquire))
+                return; // processor is being destroyed
+
+            if (result.succeeded())
+                installClip (result.clip, Status::AudioReady);
+            else
+            {
+                lastErrorMessage = result.errorMessage;
+                setStatus (Status::Error);
+            }
+        },
+        alive);
+}
+
+void MelotheonAudioProcessor::setPlayOriginalParameter (bool shouldPlay)
+{
+    if (auto* param = apvts.getParameter ("playOriginal"); param != nullptr)
+        param->setValueNotifyingHost (shouldPlay ? 1.0f : 0.0f);
+}
+
+void MelotheonAudioProcessor::installClip (std::shared_ptr<const AudioClip> clip,
+                                           Status statusAfter)
+{
+    jassert (clip != nullptr);
+    previewEngine.setClip (clip);
+    activeClip.store (clip, std::memory_order_release);
+    clipVersion.fetch_add (1, std::memory_order_acq_rel);
+    setStatus (statusAfter);
+}
+
+void MelotheonAudioProcessor::updateInputMeter (const juce::AudioBuffer<float>& buffer)
+{
+    const int numSamples = buffer.getNumSamples();
+    if (numSamples <= 0)
+        return;
+
+    const double rate = hostSampleRate.load (std::memory_order_acquire);
+    const double dt = rate > 0.0 ? static_cast<double> (numSamples) / rate : 0.01;
+
+    float blockPeak = 0.0f;
+    double sumSquares = 0.0;
+    const int numChannels = buffer.getNumChannels();
+
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        const float* data = buffer.getReadPointer (ch);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float sample = data[i];
+            const float magnitude = std::abs (sample);
+            if (magnitude > blockPeak)
+                blockPeak = magnitude;
+            sumSquares += static_cast<double> (sample) * static_cast<double> (sample);
+        }
+    }
+
+    const float blockRms = static_cast<float> (
+        std::sqrt (sumSquares / static_cast<double> (numSamples * numChannels)));
+
+    // Peak: instant attack, exponential release (tau ~0.25 s) so the
+    // meter falls smoothly instead of flickering.
+    const float release = static_cast<float> (std::exp (-dt / 0.25));
+    meterPeakLinear = juce::jmax (blockPeak, meterPeakLinear * release);
+
+    // RMS: one-pole smoothing (tau ~0.1 s).
+    const float alpha = static_cast<float> (1.0 - std::exp (-dt / 0.1));
+    meterRmsLinear += alpha * (blockRms - meterRmsLinear);
+
+    const float peakDb = juce::jlimit (-60.0f, 0.0f,
+                                       juce::Decibels::gainToDecibels (meterPeakLinear));
+    const float rmsDb = juce::jlimit (-60.0f, 0.0f,
+                                      juce::Decibels::gainToDecibels (meterRmsLinear));
+    inputPeakDb.store (peakDb, std::memory_order_release);
+    inputRmsDb.store (rmsDb, std::memory_order_release);
+}
+
+void MelotheonAudioProcessor::updateSilenceStatus (int numSamples)
+{
+    const Status current = getStatus();
+    if (current != Status::Ready && current != Status::NoInput
+        && current != Status::EmptySource)
+        return;
+
+    if (meterPeakLinear < 0.0001f) // below ~-80 dBFS
+        silentSamples += numSamples;
+    else
+        silentSamples = 0;
+
+    const double rate = hostSampleRate.load (std::memory_order_acquire);
+    if (silentSamples > static_cast<int> (rate)) // ~1 s of silence
+    {
+        if (current == Status::Ready)
+            setStatus (Status::NoInput);
+    }
+    else if (meterPeakLinear >= 0.0001f)
+    {
+        if (current == Status::NoInput)
+            setStatus (Status::Ready);
+        else if (current == Status::EmptySource && getInputSource() == InputSource::Live)
+            setStatus (Status::Ready);
+    }
 }
 
 juce::AudioProcessorEditor* MelotheonAudioProcessor::createEditor()
@@ -131,6 +382,8 @@ juce::AudioProcessorEditor* MelotheonAudioProcessor::createEditor()
 void MelotheonAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // Persist the editor parameters (APVTS state) into the host project.
+    // The recorded/imported audio clip is NOT serialized: a project
+    // reload without its temporary clip returns to READY / EMPTY SOURCE.
     juce::MemoryOutputStream stream (destData, false);
     apvts.state.writeToStream (stream);
 }
