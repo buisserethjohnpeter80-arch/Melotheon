@@ -11,10 +11,11 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 35
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure
         run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
@@ -22,8 +23,54 @@ jobs:
       - name: Build VST3
         run: cmake --build build --config Release --parallel 2
 
+      - name: Run Phase 2.1 tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Validate VST3 with pluginval
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "v1.0.4"
+          $expectedSha256 = "c08e61ce3b96db41636f8ec7e76f4c7e2c13ebdac7fa1b5a1f52b4f32ec715ab"
+          $zip = Join-Path $env:RUNNER_TEMP "pluginval_Windows.zip"
+          $validatorDir = Join-Path $env:RUNNER_TEMP "pluginval"
+          $resultsDir = Join-Path $PWD "build/pluginval-results"
+          $pluginPath = Join-Path $PWD "build/Melotheon_artefacts/Release/VST3/Melotheon.vst3"
+
+          Invoke-WebRequest `
+            -Uri "https://github.com/Tracktion/pluginval/releases/download/$version/pluginval_Windows.zip" `
+            -OutFile $zip
+
+          $actualSha256 = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "pluginval archive checksum mismatch"
+          }
+
+          Expand-Archive -Path $zip -DestinationPath $validatorDir -Force
+          New-Item -ItemType Directory -Path $resultsDir -Force | Out-Null
+
+          & (Join-Path $validatorDir "pluginval.exe") `
+            --strictness-level 5 `
+            --skip-gui-tests `
+            --timeout-ms 60000 `
+            --output-dir $resultsDir `
+            --validate $pluginPath
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "pluginval failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: melotheon-validation-logs
+          path: build/pluginval-results
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload VST3
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: melotheon-vst3
           path: build/Melotheon_artefacts/Release/VST3/Melotheon.vst3

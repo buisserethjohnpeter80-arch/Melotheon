@@ -105,13 +105,15 @@ target_link_libraries(Melotheon
         juce::juce_recommended_warning_flags
 )
 
-# ---- Phase 2 unit tests (console app, no GUI, no host) ----
+# ---- Phase 2.1 unit tests (console app, no GUI, no host) ----
 # Covers the audio foundation: stereo-to-mono conversion, mono copy,
 # capture limits / state transitions, preview state transitions and
 # resampling, file-loader rejection + valid WAV round-trip, AudioClip
 # metadata, and processor pass-through. The test target is built by
 # the normal build (including Windows CI) so a broken test breaks
-# the build; run it with `ctest --test-dir build -C Release`.
+# the build. Windows CI also executes it and validates the final VST3
+# bundle with pluginval. Run locally with
+# `ctest --test-dir build -C Release --output-on-failure`.
 include(CTest)
 
 # juce_add_console_app (not plain add_executable): only targets

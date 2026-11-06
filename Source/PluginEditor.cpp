@@ -318,8 +318,8 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
 MelotheonAudioProcessorEditor::~MelotheonAudioProcessorEditor()
 {
-    editorAlive->store (false, std::memory_order_release);
     stopTimer();
+    fileChooser.reset();
     setLookAndFeel (nullptr);
 }
 
@@ -328,22 +328,27 @@ void MelotheonAudioProcessorEditor::startImport()
     if (fileChooser != nullptr)
         return; // a chooser is already open
 
-    fileChooser = std::make_unique<juce::FileChooser> (
+    auto chooser = std::make_shared<juce::FileChooser> (
         "Import Audio", juce::File{}, AudioFileLoader::getFileFilter());
+    fileChooser = chooser;
 
-    auto alive = editorAlive;
-    fileChooser->launchAsync (
+    juce::Component::SafePointer<MelotheonAudioProcessorEditor> safeEditor (this);
+    chooser->launchAsync (
         juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-        [this, alive] (const juce::FileChooser& chooser)
+        [safeEditor, chooser] (const juce::FileChooser& completedChooser)
         {
-            fileChooser.reset();
+            const juce::File file = completedChooser.getResult();
 
-            if (! alive->load (std::memory_order_acquire))
+            if (safeEditor == nullptr)
                 return; // editor was closed while choosing
 
-            const juce::File file = chooser.getResult();
+            // Reset only the chooser that produced this callback. The
+            // captured shared_ptr keeps it alive until this lambda ends.
+            if (safeEditor->fileChooser == chooser)
+                safeEditor->fileChooser.reset();
+
             if (file.existsAsFile())
-                audioProcessor.startFileImport (file);
+                safeEditor->audioProcessor.startFileImport (file);
         });
 }
 

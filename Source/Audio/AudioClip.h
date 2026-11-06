@@ -11,10 +11,11 @@
 // Stereo-to-mono rule: monoSample = 0.5f * (left + right). A
 // single-channel source is copied directly.
 //
-// Ownership: the processor holds the active clip as
-// std::atomic<std::shared_ptr<const AudioClip>>. The audio thread
-// takes a local shared_ptr copy per block; the message thread swaps
-// the clip in. No locks, no allocation in processBlock().
+// Ownership: the processor and preview engine hold the active clip on
+// the message thread. AudioPreviewEngine publishes a stable non-owning
+// pointer to processBlock() and waits for an in-flight render before it
+// releases the old owner. No shared_ptr operation, lock or allocation
+// occurs in processBlock().
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>

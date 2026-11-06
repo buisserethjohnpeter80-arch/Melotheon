@@ -59,6 +59,11 @@ public:
     void loadFileAsync (const juce::File& file, Callback callback,
                         std::shared_ptr<std::atomic<bool>> aliveFlag);
 
+    // Invalidate the result of any load already in flight. Decoding may
+    // finish on the worker, but its message-thread callback is dropped.
+    // This is used when Record or Play takes ownership of the transport.
+    void cancelPendingLoad();
+
     // File filter string for juce::FileChooser, e.g.
     // "*.wav;*.aif;*.aiff;*.flac" (+ "*.mp3" when supported).
     static juce::String getFileFilter();

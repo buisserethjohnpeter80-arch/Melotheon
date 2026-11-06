@@ -36,7 +36,6 @@
 // "MELOTHEON" (see melotheon::brandTextUtf8, explicit UTF-8 bytes).
 
 #include <JuceHeader.h>
-#include <atomic>
 #include <memory>
 #include "PluginProcessor.h"
 #include "UI/MelotheonLookAndFeel.h"
@@ -79,11 +78,6 @@ private:
     float offsetY = 0.0f;
     juce::String lastKeyText;
 
-    // Set to false in the destructor so a late FileChooser callback
-    // never touches a destroyed editor.
-    std::shared_ptr<std::atomic<bool>> editorAlive
-        = std::make_shared<std::atomic<bool>> (true);
-
     // Polled state (timerCallback only): -1 / empty forces a refresh
     // on the first tick, so an editor opened after a clip was loaded
     // still shows it.
@@ -92,7 +86,9 @@ private:
     juce::String lastStatusText;
     bool lastPlayOriginalParam = false;
 
-    std::unique_ptr<juce::FileChooser> fileChooser;
+    // The async callback keeps a shared owner until the native chooser
+    // closes. A Component::SafePointer protects access to this editor.
+    std::shared_ptr<juce::FileChooser> fileChooser;
 
     // Header.
     IconButton recordButton { IconButton::Kind::Record };

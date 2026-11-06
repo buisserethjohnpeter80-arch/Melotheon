@@ -133,6 +133,11 @@ void AudioFileLoader::loadFileAsync (const juce::File& file, Callback callback,
                        true);
 }
 
+void AudioFileLoader::cancelPendingLoad()
+{
+    loadGeneration.fetch_add (1, std::memory_order_acq_rel);
+}
+
 juce::String AudioFileLoader::getFileFilter()
 {
     juce::String filter = "*.wav;*.aif;*.aiff;*.flac";

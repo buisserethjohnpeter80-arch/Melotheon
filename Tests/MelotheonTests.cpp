@@ -1,4 +1,4 @@
-// Melotheon Phase 2 unit tests.
+// Melotheon Phase 2.1 unit tests.
 //
 // Console app, no GUI, no host, no MessageManager: every test calls
 // the audio-foundation classes (and the processor) directly. The
@@ -144,11 +144,19 @@ void testCaptureStateTransitions()
     CHECK (engine.startRecording());
     engine.processInput (block);
     CHECK (engine.getRecordedSamples() == 512);
-    engine.stopRecording();
+    CHECK (engine.stopRecording() == 512);
 
     // Input while idle is ignored (no write position movement).
     engine.processInput (block);
     CHECK (engine.getRecordedSamples() == 512);
+
+    // An armed take with no audio callback is empty and must never
+    // publish a zero-length AudioClip.
+    CHECK (engine.startRecording());
+    CHECK (engine.stopRecording() == 0);
+    CHECK (engine.createClip ("empty take") == nullptr);
+    engine.processInput (block);
+    CHECK (engine.getRecordedSamples() == 0);
 }
 
 void testCaptureMaxDurationAndLimit()
@@ -448,6 +456,63 @@ void testProcessorRecordAndPreview()
     processor.releaseResources();
 }
 
+void testProcessorEmptyTake()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+
+    CHECK (! processor.hasActiveClip());
+    CHECK (processor.getClipVersion() == 0);
+    CHECK (processor.startRecording());
+
+    // Stop before processBlock has supplied a single sample.
+    processor.stopRecording();
+    CHECK (! processor.isRecording());
+    CHECK (! processor.hasActiveClip());
+    CHECK (processor.getClipVersion() == 0);
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::NoInput);
+}
+
+void testProcessorTransportExclusion()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+
+    juce::AudioBuffer<float> block (2, 512);
+    block.clear();
+    block.addSample (0, 0, 0.25f);
+    block.addSample (1, 0, 0.25f);
+    juce::MidiBuffer midi;
+
+    // Create a first valid clip and begin previewing it.
+    CHECK (processor.startRecording());
+    processor.processBlock (block, midi);
+    processor.stopRecording();
+    CHECK (processor.getClipVersion() == 1);
+    CHECK (processor.startPreview());
+    CHECK (processor.isPreviewPlaying());
+
+    // Record owns the transport and must stop/reset preview.
+    CHECK (processor.startRecording());
+    CHECK (processor.isRecording());
+    CHECK (! processor.isPreviewPlaying());
+    CHECK (processor.getPreviewPositionSeconds() == 0.0);
+
+    block.clear();
+    block.addSample (0, 0, 0.5f);
+    block.addSample (1, 0, 0.5f);
+    processor.processBlock (block, midi);
+
+    // Play while recording finalizes the new take, then previews it.
+    CHECK (processor.startPreview());
+    CHECK (! processor.isRecording());
+    CHECK (processor.isPreviewPlaying());
+    CHECK (processor.getClipVersion() == 2);
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::Playing);
+
+    processor.stopPreview();
+}
+
 } // namespace
 
 int main()
@@ -463,11 +528,13 @@ int main()
     testFileLoaderValidWav();
     testProcessorPassThrough();
     testProcessorRecordAndPreview();
+    testProcessorEmptyTake();
+    testProcessorTransportExclusion();
 
     // Clean up the temp files.
     getTestDir().deleteRecursively();
 
-    std::cout << "Melotheon Phase 2 tests: " << (checks - failures) << "/" << checks
+    std::cout << "Melotheon Phase 2.1 tests: " << (checks - failures) << "/" << checks
               << " checks passed";
     if (failures == 0)
         std::cout << " - ALL GREEN\n";

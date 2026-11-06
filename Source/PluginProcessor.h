@@ -18,11 +18,11 @@
 // multiplication, choir generation, AI. ANALYZE stays non-functional.
 //
 // Thread safety: processBlock() never allocates, never locks, never
-// touches files or the UI. The active clip is an immutable
-// std::atomic<std::shared_ptr<const AudioClip>>; the audio thread
-// takes a local copy per block and the message thread swaps it in.
-// Recording, playback and file loading only touch shared state
-// through atomics or message-thread handoffs.
+// touches files or the UI, and never changes shared_ptr ownership. The
+// immutable active clip is owned on the message thread. AudioPreviewEngine
+// hands a stable raw pointer to the audio callback and defers ownership
+// changes until any in-flight render finishes. Recording, playback and
+// file loading use atomics or explicit message-thread handoffs.
 //
 // The AudioProcessorValueTreeState holds the interface parameters so
 // the editor state persists in the host project. The audio recording
@@ -108,10 +108,8 @@ public:
     // (reads lastErrorMessage). For Error this is the error message.
     juce::String getStatusText() const;
 
-    std::shared_ptr<const AudioClip> getActiveClip() const
-    {
-        return activeClip.load (std::memory_order_acquire);
-    }
+    // Message thread only. The audio callback does not access this owner.
+    std::shared_ptr<const AudioClip> getActiveClip() const { return activeClip; }
 
     bool hasActiveClip() const
     {
@@ -169,6 +167,10 @@ private:
     // Install a finished clip as the active one (message thread).
     void installClip (std::shared_ptr<const AudioClip> clip, Status statusAfter);
 
+    // Stop capture, wait for the last audio-thread copy and publish a
+    // non-empty take. Returns false for no active take or zero samples.
+    bool finalizeCapture (Status statusAfter);
+
     // Audio-thread helpers (processBlock only).
     void updateInputMeter (const juce::AudioBuffer<float>& buffer);
     void updateSilenceStatus (int numSamples);
@@ -177,7 +179,7 @@ private:
     AudioPreviewEngine previewEngine;
     AudioFileLoader fileLoader;
 
-    std::atomic<std::shared_ptr<const AudioClip>> activeClip;
+    std::shared_ptr<const AudioClip> activeClip; // message-thread owner
     std::atomic<int> status { static_cast<int> (Status::Ready) };
     std::atomic<int> clipVersion { 0 };
     std::atomic<float> inputPeakDb { -60.0f };

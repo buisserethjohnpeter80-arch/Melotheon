@@ -194,6 +194,13 @@ bool MelotheonAudioProcessor::startRecording()
         setStatus (Status::Error);
         return false;
     }
+
+    // A new live take owns the transport. Invalidate any pending file
+    // import and stop preview before arming capture.
+    fileLoader.cancelPendingLoad();
+    previewEngine.stop();
+    setPlayOriginalParameter (false);
+
     if (! captureEngine.startRecording())
         return false;
 
@@ -203,11 +210,7 @@ bool MelotheonAudioProcessor::startRecording()
 
 void MelotheonAudioProcessor::stopRecording()
 {
-    if (captureEngine.stopRecording() < 0)
-        return; // nothing was recording
-
-    auto clip = captureEngine.createClip ("LIVE RECORDING");
-    installClip (clip, Status::AudioReady);
+    finalizeCapture (Status::AudioReady);
 }
 
 void MelotheonAudioProcessor::finalizeRecordingFromLimit()
@@ -215,20 +218,23 @@ void MelotheonAudioProcessor::finalizeRecordingFromLimit()
     if (! captureEngine.limitReached())
         return;
 
-    const int recorded = captureEngine.stopRecording();
-    if (recorded < 0)
-    {
-        captureEngine.clearLimitFlag();
-        return;
-    }
-
-    auto clip = captureEngine.createClip ("LIVE RECORDING");
-    captureEngine.clearLimitFlag();
-    installClip (clip, Status::LimitReached);
+    finalizeCapture (Status::LimitReached);
 }
 
 bool MelotheonAudioProcessor::startPreview()
 {
+    // Play and Record are mutually exclusive. Pressing Play while a
+    // take is active finalizes that take first, then previews it.
+    if (captureEngine.isRecording() || captureEngine.limitReached())
+    {
+        if (! finalizeCapture (Status::AudioReady))
+            return false;
+    }
+
+    // Do not let an older asynchronous import replace the clip while
+    // the user is previewing it.
+    fileLoader.cancelPendingLoad();
+
     if (! hasActiveClip())
     {
         setStatus (Status::EmptySource);
@@ -265,6 +271,13 @@ void MelotheonAudioProcessor::startFileImport (const juce::File& file)
         return;
     }
 
+    // Import owns the transport. Finish a valid live take, then stop
+    // preview so a late file result cannot collide with Record/Play.
+    if (captureEngine.isRecording() || captureEngine.limitReached())
+        finalizeCapture (Status::AudioReady);
+    previewEngine.stop();
+    setPlayOriginalParameter (false);
+
     setStatus (Status::Loading);
 
     auto alive = aliveFlag;
@@ -294,11 +307,41 @@ void MelotheonAudioProcessor::setPlayOriginalParameter (bool shouldPlay)
 void MelotheonAudioProcessor::installClip (std::shared_ptr<const AudioClip> clip,
                                            Status statusAfter)
 {
-    jassert (clip != nullptr);
+    if (clip == nullptr || clip->isEmpty())
+    {
+        setStatus (Status::EmptySource);
+        return;
+    }
+
     previewEngine.setClip (clip);
-    activeClip.store (clip, std::memory_order_release);
+    activeClip = std::move (clip);
     clipVersion.fetch_add (1, std::memory_order_acq_rel);
     setStatus (statusAfter);
+}
+
+bool MelotheonAudioProcessor::finalizeCapture (Status statusAfter)
+{
+    const int recorded = captureEngine.stopRecording();
+    captureEngine.clearLimitFlag();
+
+    if (recorded < 0)
+        return false;
+
+    if (recorded == 0)
+    {
+        setStatus (Status::NoInput);
+        return false;
+    }
+
+    auto clip = captureEngine.createClip ("LIVE RECORDING");
+    if (clip == nullptr || clip->isEmpty())
+    {
+        setStatus (Status::NoInput);
+        return false;
+    }
+
+    installClip (std::move (clip), statusAfter);
+    return true;
 }
 
 void MelotheonAudioProcessor::updateInputMeter (const juce::AudioBuffer<float>& buffer)

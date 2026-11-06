@@ -25,7 +25,7 @@ Every control is a real JUCE component. Knobs are draggable, dropdowns
 open with placeholder choices, and Record / Play / Stop change their
 visual selected state only.
 
-## Phase 2 — audio foundation (current)
+## Phase 2.1 — stable audio foundation (current)
 
 Phase 2 connects the audio foundation to the Phase 1 interface, with
 no change to the layout, colours, sizes or brand text:
@@ -50,8 +50,20 @@ no change to the layout, colours, sizes or brand text:
   (play the loaded file / recorded clip).
 
 The active clip is an immutable `AudioClip` (original channels kept
-for preview, separate mono copy for future analysis) held as
-`std::atomic<std::shared_ptr<const AudioClip>>`.
+for preview, separate mono copy for future analysis). Ownership stays
+on the message thread. The audio callback reads a stable non-owning
+pointer, so `processBlock()` never performs shared-pointer reference
+counting or destruction.
+
+Phase 2.1 also hardens the working foundation:
+
+- Record and Play are mutually exclusive. Play finalizes a valid take;
+  Record stops and resets preview.
+- Stop waits for the current capture copy before publishing the clip.
+- An empty take reports NO INPUT and never replaces the active clip.
+- Stop/Pause always wins over an in-flight preview render.
+- Closing the editor while the file chooser is open is safe.
+- A pending import cannot replace a clip after Record or Play takes over.
 
 ## What is NOT implemented yet
 
@@ -67,8 +79,9 @@ These are marked `// TODO: PHASE_3_AUDIO_LOGIC` in the code.
 ## Build (Windows, GitHub Actions)
 
 Push to `main` (or run the workflow manually): the **Windows** workflow
-builds the VST3 on a `windows-latest` runner and uploads
-`melotheon-vst3` as an artifact. No local Visual Studio install needed.
+builds the VST3, executes the CTest suite, validates the real VST3 bundle
+with pluginval strictness level 5, then uploads `melotheon-vst3` as an
+artifact. No local Visual Studio install is needed.
 
 ## Build (local, Visual Studio 2022)
 
@@ -82,7 +95,7 @@ The `.vst3` bundle lands under
 (usually `C:\Program Files\Common Files\VST3\`) and rescan plugins in
 FL Studio.
 
-Run the Phase 2 unit tests after any build:
+Run the Phase 2.1 unit tests after any build:
 
 ```bat
 ctest --test-dir build -C Release --output-on-failure

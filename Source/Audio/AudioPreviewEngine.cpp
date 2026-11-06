@@ -1,17 +1,50 @@
 // AudioPreviewEngine implementation. See the header for the contract:
 // render() is real-time safe, resamples by linear interpolation and
-// never allocates, locks or touches the filesystem.
+// never allocates, locks, performs shared_ptr reference counting or
+// touches the filesystem.
 
 #include "AudioPreviewEngine.h"
 
 #include <algorithm>
+#include <thread>
+
+namespace
+{
+class RenderActivityGuard
+{
+public:
+    explicit RenderActivityGuard (std::atomic<int>& counterToUse)
+        : counter (counterToUse)
+    {
+        counter.fetch_add (1, std::memory_order_seq_cst);
+    }
+
+    ~RenderActivityGuard()
+    {
+        counter.fetch_sub (1, std::memory_order_seq_cst);
+    }
+
+private:
+    std::atomic<int>& counter;
+};
+} // namespace
+
+AudioPreviewEngine::~AudioPreviewEngine()
+{
+    setClip (nullptr);
+}
 
 void AudioPreviewEngine::setClip (std::shared_ptr<const AudioClip> newClip)
 {
     playing.store (false, std::memory_order_release);
+    transportGeneration.fetch_add (1, std::memory_order_acq_rel);
+    clipForAudio.store (nullptr, std::memory_order_seq_cst);
+    waitForRendererToFinish();
+
+    ownedClip = std::move (newClip);
     positionSamples.store (0.0, std::memory_order_release);
     endedFlag.store (false, std::memory_order_release);
-    clip.store (std::move (newClip), std::memory_order_release);
+    clipForAudio.store (ownedClip.get(), std::memory_order_seq_cst);
 }
 
 bool AudioPreviewEngine::start()
@@ -21,6 +54,7 @@ bool AudioPreviewEngine::start()
         return false;
 
     endedFlag.store (false, std::memory_order_release);
+    transportGeneration.fetch_add (1, std::memory_order_acq_rel);
     playing.store (true, std::memory_order_release);
     return true;
 }
@@ -28,12 +62,16 @@ bool AudioPreviewEngine::start()
 void AudioPreviewEngine::stop()
 {
     playing.store (false, std::memory_order_release);
+    transportGeneration.fetch_add (1, std::memory_order_acq_rel);
     positionSamples.store (0.0, std::memory_order_release);
+    endedFlag.store (false, std::memory_order_release);
 }
 
 void AudioPreviewEngine::pause()
 {
     playing.store (false, std::memory_order_release);
+    transportGeneration.fetch_add (1, std::memory_order_acq_rel);
+    endedFlag.store (false, std::memory_order_release);
 }
 
 double AudioPreviewEngine::getPositionSeconds() const
@@ -56,11 +94,22 @@ void AudioPreviewEngine::render (juce::AudioBuffer<float>& buffer, double hostSa
     if (! playing.load (std::memory_order_acquire) || hostSampleRate <= 0.0)
         return;
 
-    auto c = getClip();
+    RenderActivityGuard renderGuard (renderersInFlight);
+    const std::uint64_t generation = transportGeneration.load (std::memory_order_acquire);
+
+    // A stop or clip replacement may have arrived between the fast-path
+    // check and our in-flight announcement.
+    if (! playing.load (std::memory_order_acquire))
+        return;
+
+    const AudioClip* c = clipForAudio.load (std::memory_order_seq_cst);
     if (c == nullptr || c->isEmpty() || c->sourceSampleRate <= 0.0)
     {
-        playing.store (false, std::memory_order_release);
-        positionSamples.store (0.0, std::memory_order_release);
+        if (transportGeneration.load (std::memory_order_acquire) == generation)
+        {
+            playing.store (false, std::memory_order_release);
+            positionSamples.store (0.0, std::memory_order_release);
+        }
         return;
     }
 
@@ -83,9 +132,14 @@ void AudioPreviewEngine::render (juce::AudioBuffer<float>& buffer, double hostSa
             for (int ch = 0; ch < numOutputChannels; ++ch)
                 std::fill (output[ch] + n, output[ch] + numSamples, 0.0f);
 
-            playing.store (false, std::memory_order_release);
-            positionSamples.store (0.0, std::memory_order_release);
-            endedFlag.store (true, std::memory_order_release);
+            // A manual Stop/Pause or clip replacement must win over a
+            // natural-end notification from this older render block.
+            if (transportGeneration.load (std::memory_order_acquire) == generation
+                && playing.exchange (false, std::memory_order_acq_rel))
+            {
+                positionSamples.store (0.0, std::memory_order_release);
+                endedFlag.store (true, std::memory_order_release);
+            }
             return;
         }
 
@@ -105,8 +159,16 @@ void AudioPreviewEngine::render (juce::AudioBuffer<float>& buffer, double hostSa
         position += ratio;
     }
 
-    // Only publish the new position if playback is still running:
-    // a stop() from the UI during this block must win.
-    if (playing.load (std::memory_order_acquire))
+    // Only publish the new position if this is still the current
+    // transport generation. This makes Stop/Pause win even when it
+    // arrives after the render block's first playing check.
+    if (playing.load (std::memory_order_acquire)
+        && transportGeneration.load (std::memory_order_acquire) == generation)
         positionSamples.store (position, std::memory_order_release);
+}
+
+void AudioPreviewEngine::waitForRendererToFinish()
+{
+    while (renderersInFlight.load (std::memory_order_seq_cst) != 0)
+        std::this_thread::yield();
 }
