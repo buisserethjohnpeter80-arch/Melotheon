@@ -433,25 +433,44 @@ void MelotheonAudioProcessorEditor::paint (juce::Graphics& g)
         g.drawRoundedRectangle (area, Tokens::panelCornerRadius * scale, 1.0f);
     }
 
-    // Header: custom "M" monogram (drawn, no FL Studio logo).
+    // Header: Melotheon soundwave "M" (vector version of the chosen
+    // logo #5: vertical waveform bars forming an M, orange to gold).
+    // Drawn with juce::Graphics so it stays crisp at any size and
+    // needs no image asset; no FL Studio logo is used.
     {
         auto logoArea = sr (22, 22, 54, 54);
-        g.setColour (Tokens::raisedPanel);
+        g.setColour (Tokens::knobBody);
         g.fillRoundedRectangle (logoArea, Tokens::cornerRadius * scale);
         g.setColour (Tokens::border);
         g.drawRoundedRectangle (logoArea, Tokens::cornerRadius * scale, 1.0f);
-        juce::Path m;
+
+        // Bar heights trace an M: tall at both sides, dip in the middle.
+        static constexpr float barHeights[] = {
+            0.55f, 0.80f, 0.95f, 1.00f, 0.85f, 0.65f, 0.50f, 0.35f,
+            0.45f, 0.60f, 0.80f, 0.95f, 1.00f, 0.85f, 0.55f,
+        };
+        constexpr int numBars = 15;
         const float x = logoArea.getX(), y = logoArea.getY();
         const float w = logoArea.getWidth(), h = logoArea.getHeight();
-        m.startNewSubPath (x + w * 0.18f, y + h * 0.78f);
-        m.lineTo (x + w * 0.18f, y + h * 0.22f);
-        m.lineTo (x + w * 0.5f, y + h * 0.55f);
-        m.lineTo (x + w * 0.82f, y + h * 0.22f);
-        m.lineTo (x + w * 0.82f, y + h * 0.78f);
-        g.setColour (Tokens::activeOrange);
-        g.strokePath (m, juce::PathStrokeType (4.0f * scale,
-                                              juce::PathStrokeType::curved,
-                                              juce::PathStrokeType::rounded));
+        const float padX = w * 0.10f, padY = h * 0.12f;
+        const float innerW = w - padX * 2.0f, innerH = h - padY * 2.0f;
+        const float stepX = innerW / static_cast<float> (numBars);
+        const float barW = stepX * 0.62f;
+        const float centreY = y + h * 0.5f;
+        for (int i = 0; i < numBars; ++i)
+        {
+            const float t = static_cast<float> (i) / static_cast<float> (numBars - 1);
+            const float barH = barHeights[i] * innerH;
+            const float barX = x + padX + static_cast<float> (i) * stepX
+                             + (stepX - barW) * 0.5f;
+            // Orange on the left, gold on the right (logo #5 gradient:
+            // #FF8A1F -> #FFC94D).
+            g.setColour (juce::Colour::fromRGB (
+                static_cast<juce::uint8> (255),
+                static_cast<juce::uint8> (138.0f + t * 63.0f),
+                static_cast<juce::uint8> (31.0f + t * 46.0f)));
+            g.fillRect (barX, centreY - barH * 0.5f, barW, barH);
+        }
     }
 
     // Header: brand text MELOTHEON.
