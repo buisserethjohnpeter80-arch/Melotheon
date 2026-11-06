@@ -11,9 +11,11 @@
 #   cmake --build build --config Release
 # The .vst3 bundle lands under build/Melotheon_artefacts/Release/VST3/.
 #
-# Phase 1 scope: complete visual interface only. No audio-to-MIDI engine,
-# no pitch detection, no analysis, no MIDI generation, no instrument
-# hosting (see README.md). The processor passes audio through unchanged.
+# Phase 2 scope: audio foundation (capture, import, preview, meter,
+# status, real waveform) on top of the Phase 1 interface. Still no
+# pitch detection, no MIDI generation, no instrument hosting
+# (see README.md). The processor passes audio through unchanged while
+# preview is inactive.
 
 cmake_minimum_required(VERSION 3.22)
 
@@ -61,6 +63,9 @@ target_sources(Melotheon
     PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
+        Source/Audio/AudioCaptureEngine.cpp
+        Source/Audio/AudioFileLoader.cpp
+        Source/Audio/AudioPreviewEngine.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp
@@ -99,3 +104,69 @@ target_link_libraries(Melotheon
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+# ---- Phase 2 unit tests (console app, no GUI, no host) ----
+# Covers the audio foundation: stereo-to-mono conversion, mono copy,
+# capture limits / state transitions, preview state transitions and
+# resampling, file-loader rejection + valid WAV round-trip, AudioClip
+# metadata, and processor pass-through. The test target is built by
+# the normal build (including Windows CI) so a broken test breaks
+# the build; run it with `ctest --test-dir build -C Release`.
+include(CTest)
+
+# juce_add_console_app (not plain add_executable): only targets
+# created with a juce_add_* function get the generated-sources
+# directory that juce_generate_juce_header() needs below.
+juce_add_console_app(MelotheonTests)
+
+target_sources(MelotheonTests
+    PRIVATE
+        Tests/MelotheonTests.cpp
+        Source/PluginProcessor.cpp
+        Source/PluginEditor.cpp
+        Source/Audio/AudioCaptureEngine.cpp
+        Source/Audio/AudioFileLoader.cpp
+        Source/Audio/AudioPreviewEngine.cpp
+        Source/UI/MelotheonLookAndFeel.cpp
+        Source/UI/PitchEditorComponent.cpp
+        Source/UI/LevelMeterComponent.cpp
+        Source/UI/IconButton.cpp
+)
+
+# The test sources include <JuceHeader.h> (as the plugin does), so
+# the test target gets its own generated header.
+juce_generate_juce_header(MelotheonTests)
+
+target_include_directories(MelotheonTests
+    PRIVATE
+        Source
+)
+
+target_compile_options(MelotheonTests
+    PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+)
+
+target_compile_definitions(MelotheonTests
+    PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_DISPLAY_SPLASH_SCREEN=0
+)
+
+target_link_libraries(MelotheonTests
+    PRIVATE
+        juce::juce_audio_utils
+        juce::juce_audio_processors
+        juce::juce_audio_formats
+        juce::juce_audio_basics
+        juce::juce_gui_basics
+        juce::juce_dsp
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags
+)
+
+add_test(NAME MelotheonTests COMMAND MelotheonTests)
