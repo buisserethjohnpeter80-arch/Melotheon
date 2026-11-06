@@ -35,6 +35,69 @@ juce::String PitchEditorComponent::noteName (int midiNote) const
          + juce::String ((midiNote / 12) - 1);
 }
 
+void PitchEditorComponent::setClip (std::shared_ptr<const AudioClip> clip)
+{
+    activeClip = std::move (clip);
+    rebuildWaveformCache();
+    playheadSeconds = (activeClip != nullptr) ? 0.0 : -1.0;
+    repaint();
+}
+
+void PitchEditorComponent::setPlayheadPosition (double seconds)
+{
+    if (activeClip == nullptr)
+        return;
+    if (std::abs (seconds - playheadSeconds) < 0.005)
+        return;
+
+    playheadSeconds = seconds;
+    repaint();
+}
+
+void PitchEditorComponent::resized()
+{
+    // The peak cache is resolution-independent (fixed 1024 columns),
+    // so a resize needs no rebuild; the playhead position is
+    // re-derived from seconds in paint().
+}
+
+void PitchEditorComponent::rebuildWaveformCache()
+{
+    waveformPeaks.clear();
+
+    if (activeClip == nullptr)
+        return;
+
+    const auto& mono = activeClip->analysisMonoBuffer;
+    const int numSamples = mono.getNumSamples();
+    if (numSamples <= 0)
+        return;
+
+    const float* data = mono.getReadPointer (0);
+    waveformPeaks.reserve (waveformColumns);
+
+    // Bounded strided scan: at most 128 samples per column, so the
+    // cost stays flat even for a 5-minute import.
+    for (int col = 0; col < waveformColumns; ++col)
+    {
+        const int start = static_cast<int> (
+            (static_cast<juce::int64> (col) * numSamples) / waveformColumns);
+        const int end = static_cast<int> (
+            (static_cast<juce::int64> (col + 1) * numSamples) / waveformColumns);
+        const int range = juce::jmax (1, end - start);
+        const int stride = juce::jmax (1, range / 128);
+
+        float minValue = 0.0f, maxValue = 0.0f;
+        for (int i = start; i < end; i += stride)
+        {
+            const float s = data[i];
+            minValue = juce::jmin (minValue, s);
+            maxValue = juce::jmax (maxValue, s);
+        }
+        waveformPeaks.emplace_back (minValue, maxValue);
+    }
+}
+
 void PitchEditorComponent::paint (juce::Graphics& g)
 {
     using namespace melotheon;
@@ -91,6 +154,38 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         g.drawLine (x, gridY, x, height, isBar ? 1.0f : 0.5f);
     }
 
+    if (activeClip != nullptr)
+    {
+        // ---- Real waveform from the cached peaks. ----
+        // One vertical min/max line per pixel column, same grey as
+        // the reference design, spanning the complete clip.
+        if (! waveformPeaks.empty())
+        {
+            const float centreY = gridY + gridH * 0.5f;
+            const float maxAmp = gridH * 0.30f;
+            const int pixelColumns = juce::jmax (1, static_cast<int> (gridW));
+            g.setColour (Tokens::waveformGrey.withAlpha (0.5f));
+            for (int px = 0; px < pixelColumns; ++px)
+            {
+                const int col = juce::jmin (waveformColumns - 1,
+                    static_cast<int> ((static_cast<float> (px) / gridW)
+                                      * static_cast<float> (waveformColumns)));
+                const auto [minValue, maxValue] = waveformPeaks[static_cast<size_t> (col)];
+                const float x = gridX + static_cast<float> (px);
+                g.drawLine (x, centreY - maxValue * maxAmp,
+                            x, centreY - minValue * maxAmp, 1.0f);
+            }
+        }
+
+        // ---- Centered message: no pitch analysis has happened yet. ----
+        g.setFont (melotheonFont (13.0f, true));
+        g.setColour (Tokens::secondaryText);
+        g.drawText ("AUDIO READY \xC2\xB7 CLICK ANALYZE",
+                    juce::Rectangle<float> (gridX, gridY, gridW, gridH),
+                    juce::Justification::centred, true);
+    }
+    else
+    {
     // ---- Dense grey waveform behind the notes. ----
     // Deterministic filled shape (layered sines + a slow envelope
     // varying 0.4..1.0), mirrored around the grid centre so it fills
@@ -203,6 +298,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         g.setColour (Tokens::brightOrange);
         g.strokePath (curve, juce::PathStrokeType (1.5f));
     }
+    } // else: placeholder notes / curve (hidden once a clip is loaded)
 
     // ---- Piano keyboard on the left. ----
     {
@@ -244,9 +340,18 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         g.drawLine (keyboardWidth, gridY, keyboardWidth, height, 1.0f);
     }
 
-    // ---- Green vertical playhead (bar 2, beat 5.5) with a marker. ----
+    // ---- Green vertical playhead with a marker. ----
+    // With a clip it follows preview playback; otherwise it sits at
+    // the static placeholder position (bar 2, beat 5.5).
     {
-        const float playheadX = beatToX (5.5);
+        const float playheadX = (activeClip != nullptr)
+            ? gridX + (activeClip->durationSeconds > 0.0
+                           ? static_cast<float> (
+                                 juce::jlimit (0.0, activeClip->durationSeconds,
+                                               playheadSeconds)
+                                 / activeClip->durationSeconds) * gridW
+                           : 0.0f)
+            : beatToX (5.5);
         g.setColour (Tokens::statusGreen);
         g.drawLine (playheadX, gridY, playheadX, height, 1.5f);
         juce::Path marker;
