@@ -7,8 +7,9 @@
 // roll). The FL Studio toolbar, Browser, Channel Rack, Playlist and
 // outer plugin-wrapper title bar visible in the mockup are HOST context
 // only: they are NOT drawn here. FL Studio creates its own wrapper.
-// The FL Studio fruit logo is NOT used: the header shows a custom
-// Melotheon "M" monogram drawn with juce::Graphics.
+// The FL Studio fruit logo is NOT used: the header shows the Melotheon
+// soundwave-M (logo #5: vertical waveform bars forming an M, orange to
+// gold) drawn with juce::Graphics.
 //
 // Phase 1 is the VISUAL interface only. Every button, knob, display,
 // dropdown, meter and panel is a real JUCE component, but:
