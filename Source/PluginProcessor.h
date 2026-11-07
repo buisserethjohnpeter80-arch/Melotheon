@@ -39,6 +39,7 @@
 #include "Audio/AudioFileLoader.h"
 #include "Audio/AudioPreviewEngine.h"
 #include "Audio/SampleRenderEngine.h"
+#include "Analysis/MelodyEditor.h"
 #include "Analysis/MelodyNotes.h"
 #include "Analysis/PitchAnalysisEngine.h"
 
@@ -92,7 +93,7 @@ public:
 
     const juce::String getName() const override { return "Melotheon"; }
     bool acceptsMidi() const override { return false; }
-    bool producesMidi() const override { return false; }
+    bool producesMidi() const override { return true; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
     int getNumPrograms() override { return 1; }
@@ -252,12 +253,27 @@ public:
     bool commitPitchCurveEdit (const PitchAnalysisResult& editedAnalysis);
     bool isPitchAnalysisEdited() const { return pitchAnalysisEdited; }
 
+    // Manual note edit (message thread): replace the stored melody
+    // with the editor's edited sequence (MOVE / CUT / STRETCH),
+    // re-render the instrument when a sound is loaded and mark the
+    // melody edited. When pitchShift is active, the underlying pitch
+    // frames in that note's time range move by the same delta
+    // (NoteSegmenter::applyCurveEdit), so the curve and the note
+    // blocks stay in sync. Time-only moves leave the frames alone.
+    // Returns false for an empty edited melody. A later RE-ANALYZE
+    // overwrites manual edits (see isPitchAnalysisEdited()). The
+    // edited melody is the single source for EXPORT MIDI, DRAG MIDI
+    // and PLAY INSTRUMENT as well as live MIDI out.
+    bool commitMelodyEdit (const MelodyNoteSequence& editedMelody,
+                           const MelodyEditor::PitchShift& pitchShift = {});
+
     // Piano-key audition (message thread). startAudition() plays the
     // given MIDI note until stopAudition(): the loaded one-shot pitched
     // from its detected root, or a built-in sine tone when no sound is
     // loaded, so a key always makes sound. Fixed velocity 0.8. The
     // voice is mixed into the output in processBlock(); it never
-    // touches host MIDI out (SEND TO CHANNEL is a later phase).
+    // touches host MIDI out (that is the separate SEND TO CHANNEL path
+    // below).
     void startAudition (int midiNote);
     void stopAudition();
     int getAuditionNote() const { return auditionNote.load (std::memory_order_acquire); }
@@ -301,6 +317,36 @@ public:
     // the current host BPM when available, otherwise 120 BPM.
     bool exportMidiToFile (const juce::File& target);
 
+    // Live MIDI out (SEND TO CHANNEL + CHANNEL 1-16 + MIDI OUT).
+    // The MIDI OUT toggle is the master switch and SEND TO CHANNEL
+    // is the per-melody switch: both must be on for any MIDI to
+    // leave the plugin. When both are on and a preview (or instrument
+    // preview) is playing, processBlock() streams the CURRENT melody
+    // as note-on/note-off to the host, in time with the playhead, on
+    // the selected channel. Note-offs are sent for every sounding
+    // note on stop, melody change, channel change and preview end,
+    // so no note can stick.
+    // getMidiChannel() is the single source of truth for the channel
+    // (1-16): exportMidiToFile, prepareMidiDragFile and the live
+    // scheduler all read it.
+    int getMidiChannel() const
+    {
+        if (midiChannelParam == nullptr)
+            return 1;
+        return juce::jlimit (1, 16, 1 + static_cast<int> (
+            midiChannelParam->load (std::memory_order_acquire)));
+    }
+    bool midiOutEnabled() const
+    {
+        return midiOutParam != nullptr
+            && midiOutParam->load (std::memory_order_acquire) > 0.5f;
+    }
+    bool sendToChannelEnabled() const
+    {
+        return sendToChannelParam != nullptr
+            && sendToChannelParam->load (std::memory_order_acquire) > 0.5f;
+    }
+
     // Keep the PLAY ORIGINAL toggle parameter in sync with preview
     // state. Message thread only.
     void setPlayOriginalParameter (bool shouldPlay);
@@ -318,6 +364,12 @@ private:
     // Cancel in-flight work and remove the curve associated with the
     // previous clip. Message thread only.
     void clearPitchAnalysis();
+
+    // Replace the stored melody and publish it to the live MIDI-out
+    // voice (message thread only). Every melody assignment goes
+    // through here so export, drag, instrument render and MIDI out
+    // always read the same sequence.
+    void publishMelodyNotes (std::shared_ptr<const MelodyNoteSequence> notes);
 
     // Start/restart the offline sample render once both a sound and note
     // sequence are available. Message thread only.
@@ -340,6 +392,26 @@ private:
     // in flight, so the sample buffer is never replaced under the
     // audio thread. Mirrors AudioPreviewEngine::waitForRendererToFinish.
     void waitForAuditionToFinish();
+
+    // Live MIDI out (processBlock only). Streams the current melody
+    // as note-on/note-off with sample offsets, in time with the
+    // playhead. Real-time safe: atomics and the latched melody
+    // snapshot only, no allocation/locks/IO.
+    void renderMidiOut (juce::MidiBuffer& midiMessages, double blockStartSeconds,
+                        int numSamples, double hostRate);
+    void noteOnMidiOut (juce::MidiBuffer& midiMessages, int sampleOffset,
+                        const MelodyNote& note, int channel);
+    void noteOffMidiOut (juce::MidiBuffer& midiMessages, int sampleOffset,
+                         const MelodyNote& note);
+    void allNotesOffMidiOut (juce::MidiBuffer& midiMessages, int sampleOffset);
+    // Message thread only: wait (bounded) until no MIDI-out render
+    // is in flight, then publish the current melody pointer to the
+    // audio thread. Mirrors waitForAuditionToFinish.
+    void waitForMidiOutToFinish();
+    void publishMidiOutSequence();
+    // Reset the audio-thread MIDI-out state (prepareToPlay and
+    // releaseResources, while the callback is suspended).
+    void resetMidiOutState();
 
     // Segmentation settings of the last completed analysis, reused by
     // commitPitchCurveEdit so manual edits re-segment identically.
@@ -411,6 +483,34 @@ private:
     double auditionLatchedStep = 1.0;
     int auditionLatchedLoopStart = 0;
     int auditionLatchedLoopLength = 1;
+
+    // Cached APVTS parameter atoms, read on the audio thread.
+    // getRawParameterValue() does a map lookup, so the pointers are
+    // cached once in the constructor; the loads themselves are plain
+    // atomic reads. The APVTS owns the parameters for the lifetime
+    // of this processor.
+    std::atomic<float>* midiOutParam = nullptr;
+    std::atomic<float>* sendToChannelParam = nullptr;
+    std::atomic<float>* midiChannelParam = nullptr;
+
+    // Live MIDI out. The message thread owns melodyNotes and
+    // publishes its raw pointer + a generation bump; the audio
+    // thread latches the pointer and announces in-flight renders,
+    // so the message thread never replaces the sequence under it
+    // (same pattern as the audition voice).
+    std::atomic<const MelodyNoteSequence*> midiOutSequenceForAudio { nullptr };
+    std::atomic<std::uint64_t> midiOutGeneration { 0 };
+    std::atomic<int> midiOutRenderersInFlight { 0 };
+
+    // Audio-thread-only MIDI-out state (touched in processBlock
+    // only, reset in prepareToPlay/releaseResources while the
+    // callback is suspended).
+    const MelodyNoteSequence* midiOutLatchedSequence = nullptr;
+    std::uint64_t midiOutLatchedGeneration = 0;
+    int midiOutLastChannel = -1; // 0-based, -1 = none
+    double midiOutLastPosition = -1.0; // seconds, -1 = resync needed
+    bool midiOutNoteOn[128] = {};
+    int midiOutNoteChannel[128] = {};
 
     // Audio-thread-only meter state (written in processBlock only,
     // reset in prepareToPlay while the callback is suspended).
