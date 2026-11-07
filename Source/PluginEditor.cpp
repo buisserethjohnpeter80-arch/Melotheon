@@ -480,6 +480,21 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
         if (edited != nullptr)
             audioProcessor.commitPitchCurveEdit (*edited);
     };
+    // Manual note editing (MOVE / CUT / STRETCH): the note name shows
+    // while dragging, and the edited melody commits on release (CUT
+    // commits immediately on click). The edited melody is what
+    // EXPORT MIDI, DRAG MIDI and PLAY INSTRUMENT use.
+    pitchEditor.onNoteEditNote = [this] (int midi)
+    {
+        noteEditMidi = midi;
+    };
+    pitchEditor.onNoteEditCommitted = [this] (std::shared_ptr<MelodyNoteSequence> edited,
+                                              const MelodyEditor::PitchShift& pitchShift)
+    {
+        noteEditMidi = -1;
+        if (edited != nullptr)
+            audioProcessor.commitMelodyEdit (*edited, pitchShift);
+    };
 
     // ---- Right instrument panel ----
     addAndMakeVisible (instrumentLabel);
@@ -612,10 +627,12 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
     addAndMakeVisible (sendToChannelButton);
     styleTextButton (sendToChannelButton, Tokens::raisedPanel, Tokens::primaryText);
-    sendToChannelButton.onClick = []
-    {
-        // TODO: PHASE_3_AUDIO_LOGIC
-    };
+    // Toggle button, highlighted orange while SEND TO CHANNEL is on.
+    // The processor streams the melody to the host only while this
+    // AND MIDI OUT are both on (see renderMidiOut).
+    sendToChannelButton.setClickingTogglesState (true);
+    sendToChannelButton.setColour (juce::TextButton::buttonOnColourId, Tokens::activeOrange);
+    sendToChannelButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
 
     // ---- Parameter attachments (after all items exist). ----
     auto& apvts = audioProcessor.apvts;
@@ -635,6 +652,8 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
         apvts, "mono", monoButton);
     midiOutAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         apvts, "midiOut", midiOutButton);
+    sendToChannelAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        apvts, "sendToChannel", sendToChannelButton);
     playOriginalAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         apvts, "playOriginal", playOriginalButton);
     playInstrumentAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
@@ -1034,6 +1053,10 @@ void MelotheonAudioProcessorEditor::timerCallback()
     if (curveEditMidi >= 0)
     {
         noteText = noteTextForMidi (curveEditMidi);
+    }
+    else if (noteEditMidi >= 0)
+    {
+        noteText = noteTextForMidi (noteEditMidi);
     }
     else if (auditioningMidi >= 0)
     {
