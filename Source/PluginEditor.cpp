@@ -8,6 +8,7 @@
 #include "Audio/AudioFileLoader.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 
 namespace
@@ -65,6 +66,12 @@ juce::String formatPitchFrame (const PitchFrame& frame)
 // save-file export. Rows paint themselves with the existing dark
 // tokens, so the panel needs no LookAndFeel and stays safe if the
 // editor closes while it is open (all callbacks use SafePointers).
+//
+// Drag lifetime: the temp file is owned by the EDITOR, not the row.
+// The row only holds the path for the drag; the editor deletes the
+// file in finishMidiDrag(), which the drag callback always reaches
+// (its std::function copy survives the row). The panel is not
+// dismissable while a drag is in flight.
 class MidiPanelRow : public juce::Component
 {
 public:
@@ -77,15 +84,30 @@ public:
     // started on this row and barely moved.
     std::function<void()> onClick;
 
+    // Drag row: a plain click (no drag) used to do nothing visible.
+    // It now publishes a status hint so the user knows to press and
+    // drag the row into FL Studio.
+    std::function<void()> onClickHint;
+
     // Drag row: called once when a drag gesture passes the
     // threshold. Must return the temp .mid to drag, or an empty File
     // when there is no melody (the processor already set the
     // ANALYZE FIRST status then).
     std::function<juce::File()> prepareDragFile;
 
+    // Drag row: called once when the native drag starts. The editor
+    // marks the drag in flight so the panel cannot dismiss under it.
+    std::function<void()> onDragStarted;
+
+    // Drag row: called on the message thread when the native drag
+    // ends (dropped or cancelled) or immediately when it could not
+    // start. The editor deletes the temp file here. This callback is
+    // copied into the drag lambda, so it still runs if the row (and
+    // its panel) was destroyed mid-drag.
+    std::function<void()> onDragFinished;
+
     // Drag row: called after the native drag ends (dropped or
     // cancelled) or immediately when the drag could not start.
-    // The row already deleted the temp file by then.
     std::function<void()> onDragEnded;
 
     // Drag row: called instead of onDragEnded when there was no
@@ -96,12 +118,16 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (isHovered ? melotheon::Tokens::raisedPanel.brighter (0.10f)
-                             : melotheon::Tokens::raisedPanel);
+        // While a drag is in flight the row stays visibly highlighted
+        // (brighter fill + orange text) so the user can see the drag
+        // is live while moving toward FL Studio.
+        g.fillAll (dragStarted ? melotheon::Tokens::raisedPanel.brighter (0.22f)
+                  : isHovered ? melotheon::Tokens::raisedPanel.brighter (0.10f)
+                              : melotheon::Tokens::raisedPanel);
         g.setColour (melotheon::Tokens::border);
         g.drawRect (getLocalBounds(), 1);
-        g.setColour (isHovered ? melotheon::Tokens::activeOrange
-                               : melotheon::Tokens::primaryText);
+        g.setColour ((dragStarted || isHovered) ? melotheon::Tokens::activeOrange
+                                                : melotheon::Tokens::primaryText);
         g.setFont (melotheon::melotheonFont (fontSize, true));
         g.drawText (text, getLocalBounds().reduced (12, 0),
                     juce::Justification::centredLeft, true);
@@ -133,6 +159,7 @@ public:
             return;
 
         dragStarted = true;
+        repaint(); // the row highlights while the drag is live
         dragFile = prepareDragFile != nullptr ? prepareDragFile() : juce::File{};
         if (dragFile == juce::File{})
         {
@@ -141,32 +168,48 @@ public:
             return;
         }
 
-        // On Windows this runs the native drag on a worker thread
-        // and invokes the callback when the drag ends, so the temp
-        // file must live until then. Deletion happens in finishDrag().
+        if (onDragStarted != nullptr)
+            onDragStarted();
+
+        // On Windows this runs the native drag and invokes the
+        // callback when the drag ends, so the temp file must live
+        // until then. Deletion happens in the editor (onDragFinished),
+        // never here: this row may be destroyed before the drag ends.
         juce::Component::SafePointer<MidiPanelRow> safeThis (this);
+        auto dragFinished = onDragFinished; // copy: survives this row
         const bool started = juce::DragAndDropContainer::performExternalDragDropOfFiles (
             juce::StringArray { dragFile.getFullPathName() }, false, this,
-            [safeThis]
+            [safeThis, dragFinished]
             {
-                juce::MessageManager::callAsync ([safeThis]
+                juce::MessageManager::callAsync ([safeThis, dragFinished]
                 {
+                    if (dragFinished != nullptr)
+                        dragFinished();
                     if (safeThis != nullptr)
                         safeThis->finishDrag();
                 });
             });
         if (! started)
+        {
+            if (onDragFinished != nullptr)
+                onDragFinished();
             finishDrag();
+        }
     }
 
     void mouseUp (const juce::MouseEvent& event) override
     {
         if (draggable)
         {
-            // For the drag row, dragStarted is cleared by
-            // finishDrag() once the native drag ends; clearing it
-            // here could allow a second drag while the first is
-            // still running.
+            // A plain click on the drag row never silently does
+            // nothing: it shows how to drag. For the drag row,
+            // dragStarted is cleared by finishDrag() once the native
+            // drag ends; clearing it here could allow a second drag
+            // while the first is still running.
+            if (! dragStarted
+                && event.position.getDistanceFrom (pressPosition) < 6.0f
+                && onClickHint != nullptr)
+                onClickHint();
             return;
         }
         if (event.position.getDistanceFrom (pressPosition) < 6.0f
@@ -175,15 +218,14 @@ public:
     }
 
 private:
-    // Delete the temp file (best effort) and tell the panel the
-    // drag is over. Called on the message thread only.
+    // Clear local drag state and tell the panel the drag is over.
+    // Called on the message thread only, after onDragFinished ran
+    // (the editor already deleted the temp file by then).
     void finishDrag()
     {
-        juce::File fileToDelete = dragFile;
         dragFile = juce::File{};
         dragStarted = false;
-        if (fileToDelete.existsAsFile())
-            fileToDelete.deleteFile(); // best effort; ignore failure
+        repaint();
         if (onDragEnded != nullptr)
             onDragEnded();
     }
@@ -203,13 +245,38 @@ public:
     MidiActionPanel (int widthToUse, int rowHeightToUse, float fontSizeToUse)
         : dragRow ("DRAG MIDI TO FL", fontSizeToUse),
           exportRow ("EXPORT MIDI", fontSizeToUse),
-          rowHeight (rowHeightToUse)
+          rowHeight (rowHeightToUse),
+          captionHeight (juce::jmax (16, rowHeightToUse / 2))
     {
-        setSize (widthToUse, rowHeightToUse * 2 + 8);
+        // A caption under the rows, visible before any click, so the
+        // user knows the drag row must be pressed and dragged - a
+        // plain click on it does nothing by itself.
+        captionLabel.setText ("PRESS AND DRAG THIS ROW INTO FL STUDIO",
+                              juce::dontSendNotification);
+        captionLabel.setJustificationType (juce::Justification::centred);
+        captionLabel.setColour (juce::Label::textColourId,
+                                melotheon::Tokens::secondaryText);
+        captionLabel.setFont (melotheon::melotheonFont (fontSizeToUse * 0.75f, false));
+        setSize (widthToUse, rowHeightToUse * 2 + captionHeight + 12);
         dragRow.setDraggable (true);
+        dragRow.onClickHint = [this]
+        {
+            if (onClickHint != nullptr)
+                onClickHint();
+        };
         dragRow.prepareDragFile = [this]
         {
             return onPrepareDragFile != nullptr ? onPrepareDragFile() : juce::File{};
+        };
+        dragRow.onDragStarted = [this]
+        {
+            if (onDragStarted != nullptr)
+                onDragStarted();
+        };
+        dragRow.onDragFinished = [this]
+        {
+            if (onDragFinished != nullptr)
+                onDragFinished();
         };
         dragRow.onDragEnded = [this]
         {
@@ -228,10 +295,14 @@ public:
         };
         addAndMakeVisible (dragRow);
         addAndMakeVisible (exportRow);
+        addAndMakeVisible (captionLabel);
     }
 
     std::function<void()> onExportMidi;
     std::function<juce::File()> onPrepareDragFile;
+    std::function<void()> onClickHint;
+    std::function<void()> onDragStarted;
+    std::function<void()> onDragFinished;
     std::function<void()> onDismissRequested;
 
     void paint (juce::Graphics& g) override
@@ -247,12 +318,15 @@ public:
         const int w = getWidth() - pad * 2;
         dragRow.setBounds (pad, pad, w, rowHeight);
         exportRow.setBounds (pad, pad + rowHeight, w, rowHeight);
+        captionLabel.setBounds (pad, pad + rowHeight * 2 + 2, w, captionHeight);
     }
 
 private:
     MidiPanelRow dragRow;
     MidiPanelRow exportRow;
+    juce::Label captionLabel;
     int rowHeight;
+    int captionHeight;
 };
 } // namespace
 
@@ -381,6 +455,30 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
     pitchEditor.onPlayheadSeek = [this] (double seconds)
     {
         audioProcessor.setPreviewPositionSeconds (seconds);
+    };
+    // Piano keys audition the loaded sound (sine fallback); the note
+    // name shows in the note LCD while the key is held.
+    pitchEditor.onAuditionStart = [this] (int midi)
+    {
+        audioProcessor.startAudition (midi);
+        auditioningMidi = midi;
+    };
+    pitchEditor.onAuditionStop = [this]
+    {
+        audioProcessor.stopAudition();
+        auditioningMidi = -1;
+    };
+    // Manual curve correction: the note name shows while dragging,
+    // and the edited curve commits (re-segmented) on release.
+    pitchEditor.onCurveEditNote = [this] (int midi)
+    {
+        curveEditMidi = midi;
+    };
+    pitchEditor.onCurveEditCommitted = [this] (std::shared_ptr<PitchAnalysisResult> edited)
+    {
+        curveEditMidi = -1;
+        if (edited != nullptr)
+            audioProcessor.commitPitchCurveEdit (*edited);
     };
 
     // ---- Right instrument panel ----
@@ -561,7 +659,16 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 MelotheonAudioProcessorEditor::~MelotheonAudioProcessorEditor()
 {
     stopTimer();
+    // A held audition key must not keep sounding after the editor
+    // is gone (no mouseUp will ever arrive for it).
+    audioProcessor.stopAudition();
+    // Force the panel closed even if a drag was in flight (the
+    // editor is being destroyed; the drag callback's SafePointer to
+    // this editor is null by then, so nothing else can clean up).
+    midiDragInFlight = false;
     dismissMidiPanel();
+    if (midiDragFile.existsAsFile())
+        midiDragFile.deleteFile(); // best effort; ignore failure
     fileChooser.reset();
     setLookAndFeel (nullptr);
 }
@@ -664,11 +771,25 @@ void MelotheonAudioProcessorEditor::startMidiExport()
 
 void MelotheonAudioProcessorEditor::dismissMidiPanel()
 {
+    // A drag in flight keeps the panel (and its drag source) alive
+    // until the drag callback runs; finishMidiDrag() clears the flag.
+    // The destructor forces this off before calling here.
+    if (midiDragInFlight)
+        return;
+
     if (midiCallOutBox != nullptr)
     {
         midiCallOutBox->dismiss();
         midiCallOutBox = nullptr;
     }
+}
+
+void MelotheonAudioProcessorEditor::finishMidiDrag()
+{
+    midiDragInFlight = false;
+    if (midiDragFile.existsAsFile())
+        midiDragFile.deleteFile(); // best effort; ignore failure
+    midiDragFile = juce::File{};
 }
 
 void MelotheonAudioProcessorEditor::openMidiPanel()
@@ -693,11 +814,37 @@ void MelotheonAudioProcessorEditor::openMidiPanel()
         safeEditor->dismissMidiPanel();
         safeEditor->startMidiExport();
     };
+    panel->onClickHint = [safeEditor]
+    {
+        if (safeEditor == nullptr)
+            return;
+        safeEditor->audioProcessor.setStatusHint ("PRESS AND DRAG THIS ROW INTO FL STUDIO");
+    };
     panel->onPrepareDragFile = [safeEditor]() -> juce::File
     {
         if (safeEditor == nullptr)
             return {};
-        return safeEditor->audioProcessor.prepareMidiDragFile();
+        juce::File file = safeEditor->audioProcessor.prepareMidiDragFile();
+        // Never start a drag from a missing or empty file: the user
+        // would see a drag begin and FL would receive nothing.
+        if (file == juce::File{} || ! file.existsAsFile() || file.getSize() < 20)
+            return {};
+        // Editor-owned from here: it outlives the panel/row and is
+        // deleted only in finishMidiDrag().
+        safeEditor->midiDragFile = file;
+        return file;
+    };
+    panel->onDragStarted = [safeEditor]
+    {
+        if (safeEditor == nullptr)
+            return;
+        safeEditor->midiDragInFlight = true;
+    };
+    panel->onDragFinished = [safeEditor]
+    {
+        if (safeEditor == nullptr)
+            return;
+        safeEditor->finishMidiDrag();
     };
     panel->onDismissRequested = [safeEditor]
     {
@@ -795,10 +942,23 @@ void MelotheonAudioProcessorEditor::timerCallback()
     const auto status = audioProcessor.getStatus();
     const int statusId = static_cast<int> (status);
     const juce::String statusText = audioProcessor.getStatusText();
-    if (statusText != lastStatusText)
+    // A transient hint (e.g. "DRAG THIS ROW INTO FL STUDIO") takes
+    // over the LCD for a few seconds, then the normal status returns.
+    const int hintVersion = audioProcessor.getStatusHintVersion();
+    if (hintVersion != lastHintVersionSeen)
     {
-        lastStatusText = statusText;
-        statusLabel.setText (statusText, juce::dontSendNotification);
+        lastHintVersionSeen = hintVersion;
+        activeHintText = audioProcessor.getStatusHint();
+        hintExpiry = juce::Time::getCurrentTime() + juce::RelativeTime::seconds (3.0);
+    }
+    juce::String displayStatusText = statusText;
+    if (activeHintText.isNotEmpty()
+        && juce::Time::getCurrentTime() < hintExpiry)
+        displayStatusText = activeHintText;
+    if (displayStatusText != lastStatusText)
+    {
+        lastStatusText = displayStatusText;
+        statusLabel.setText (displayStatusText, juce::dontSendNotification);
     }
     if (statusId != lastStatusSeen)
     {
@@ -860,7 +1020,26 @@ void MelotheonAudioProcessorEditor::timerCallback()
     }
 
     juce::String noteText = "PITCH --";
-    if (analyzing)
+    // Live interaction wins over the analysis frame: the note under a
+    // curve drag, then the auditioned piano key.
+    auto noteTextForMidi = [] (int midi) -> juce::String
+    {
+        PitchFrame frame;
+        frame.midiPitch = static_cast<float> (midi);
+        frame.frequencyHz = static_cast<float> (
+            440.0 * std::pow (2.0, (static_cast<double> (midi) - 69.0) / 12.0));
+        frame.confidence = 1.0f;
+        return formatPitchFrame (frame);
+    };
+    if (curveEditMidi >= 0)
+    {
+        noteText = noteTextForMidi (curveEditMidi);
+    }
+    else if (auditioningMidi >= 0)
+    {
+        noteText = noteTextForMidi (auditioningMidi);
+    }
+    else if (analyzing)
     {
         noteText = "PITCH   "
                  + juce::String (juce::roundToInt (analysisProgress * 100.0f)) + "%";

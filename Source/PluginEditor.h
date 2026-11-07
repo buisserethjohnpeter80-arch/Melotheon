@@ -23,6 +23,12 @@
 // SEND TO CHANNEL remains a later host-integration phase. The MIDI
 // chip opens a DRAG MIDI TO FL / EXPORT MIDI panel, and the green
 // playhead in the piano roll is draggable to seek preview playback.
+// The drag temp file is owned by the editor and deleted only after
+// the native drag ends; a plain click on the drag row shows a hint in
+// the status LCD instead of doing nothing. Piano keys audition the
+// loaded sound (built-in sine when none is loaded) and the orange
+// pitch curve is draggable for manual correction: semitone steps,
+// re-segmented on release, and a later RE-ANALYZE overwrites edits.
 //
 // The editor polls the processor on a ~30 Hz timer (meter, playhead,
 // status, clip version) and never touches the audio thread directly.
@@ -82,6 +88,10 @@ private:
     // outside click; the SafePointer goes null when it is gone.
     void openMidiPanel();
     void dismissMidiPanel();
+    // Called when the native drag ends (or could not start): deletes
+    // the editor-owned temp .mid and clears the in-flight flag so the
+    // panel may dismiss again.
+    void finishMidiDrag();
 
     MelotheonAudioProcessor& audioProcessor;
     MelotheonLookAndFeel lookAndFeel;
@@ -112,6 +122,26 @@ private:
 
     // Open MIDI chip panel, if any.
     juce::Component::SafePointer<juce::CallOutBox> midiCallOutBox;
+
+    // MIDI drag session (editor-owned so the temp file outlives the
+    // panel/row if the CallOutBox is dismissed mid-drag). The file is
+    // deleted in finishMidiDrag() only, never while a drag is in
+    // flight; dismissMidiPanel() is a no-op while midiDragInFlight.
+    juce::File midiDragFile;
+    bool midiDragInFlight = false;
+
+    // Live piano-roll interaction state (timerCallback only): the key
+    // currently auditioned and the semitone under a curve drag, both
+    // shown in the note LCD instead of the analysis frame.
+    int auditioningMidi = -1;
+    int curveEditMidi = -1;
+
+    // Transient status hint (see processor setStatusHint): shown in
+    // the status LCD for a few seconds, then the normal status text
+    // returns. TimerCallback only.
+    juce::String activeHintText;
+    juce::Time hintExpiry;
+    int lastHintVersionSeen = -1;
 
     // Header.
     IconButton recordButton { IconButton::Kind::Record };
