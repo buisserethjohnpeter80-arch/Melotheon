@@ -24,8 +24,10 @@
 #include <vector>
 
 #include "../Audio/AudioClip.h"
+#include "../Analysis/MelodyEditor.h"
 #include "../Analysis/MelodyNotes.h"
 #include "../Analysis/PitchAnalysis.h"
+#include "MelotheonLookAndFeel.h"
 
 class PitchEditorComponent : public juce::Component,
                              private juce::ScrollBar::Listener
@@ -75,6 +77,27 @@ public:
     // + instrument re-render). The grey waveform is never editable.
     std::function<void (int)> onCurveEditNote; // quantized MIDI note
     std::function<void (std::shared_ptr<PitchAnalysisResult>)> onCurveEditCommitted;
+
+    // Note-edit tools (MOVE / CUT / STRETCH strip in the bar-number
+    // strip). MOVE is the default. The selected tool is highlighted
+    // orange; the tool only changes how clicks inside a note block
+    // behave — the playhead, keyboard audition and curve drag keep
+    // their existing priority.
+    enum class EditTool { Move, Cut, Stretch };
+    EditTool getEditTool() const { return editTool; }
+    void setEditTool (EditTool tool);
+
+    // Manual note editing (message thread). While the user drags a
+    // note block, onNoteEditNote reports the semitone under the mouse
+    // (the editor shows it in the note LCD). On release,
+    // onNoteEditCommitted hands the edited sequence to the editor,
+    // which commits it to the processor (melody replace + instrument
+    // re-render). The pitchShift travels with a pitch move so the
+    // underlying pitch frames move with the note; it is inactive for
+    // time-only moves and stretches. CUT commits immediately on click.
+    std::function<void (int)> onNoteEditNote; // quantized MIDI note
+    std::function<void (std::shared_ptr<MelodyNoteSequence>,
+                        const MelodyEditor::PitchShift&)> onNoteEditCommitted;
 
     // False while recording: the playhead cannot be grabbed then.
     // The editor updates this from its timer.
@@ -150,6 +173,27 @@ private:
     // accumulate). No-op when no curve drag is active.
     void applyCurveDragAt (float x, float y);
 
+    // Note-block geometry (same constants as paint(), so the grabbed
+    // block and the drawn block always agree).
+    float beatWidthValue() const;
+    float beatToXValue (double beat) const;
+    juce::Rectangle<float> noteBlockRect (const MelodyNote& note) const;
+    // Index of the note block under (x, y), or -1. In STRETCH mode
+    // edgeOut is -1 (left edge) / +1 (right edge) / 0 (body); in
+    // other modes it is always 0. Later notes are drawn over earlier
+    // ones, so the topmost match wins.
+    int noteAtPosition (float x, float y, int& edgeOut) const;
+    // Clip duration for beat snapping (the sequence duration when
+    // available, else the clip's).
+    double sequenceDurationSeconds() const;
+    // Apply the current note drag at a mouse position (recomputed
+    // from the drag-start snapshot every move). No-op when no note
+    // drag is active.
+    void applyNoteDragAt (float x, float y);
+    // Split the note at the click position (CUT tool): commits
+    // immediately. No-op when the click is too close to an edge.
+    void cutNoteAt (int noteIndex, float x);
+
     // Half-width of the smooth edit window around the grab point.
     static constexpr double curveEditWindowSeconds = 0.15;
     // Grab tolerance for the orange curve, in pixels.
@@ -180,9 +224,39 @@ private:
     std::shared_ptr<const PitchAnalysisResult> dragCurveOriginal;
     std::shared_ptr<PitchAnalysisResult> dragCurveEdited;
 
+    // Manual note drag (MOVE / STRETCH): the sequence snapshot at
+    // grab time and the working copy that follows the mouse. paint()
+    // draws the working copy while a drag is active; the processor
+    // only sees it on mouseUp (commit). CUT commits immediately and
+    // never starts a drag.
+    EditTool editTool = EditTool::Move;
+    bool draggingNote = false;
+    int dragNoteIndex = -1;
+    int dragNoteEdge = 0; // -1 = left edge, 0 = body, +1 = right edge
+    double dragNoteGrabOffsetSeconds = 0.0;
+    std::shared_ptr<const MelodyNoteSequence> dragNoteOriginal;
+    std::shared_ptr<MelodyNoteSequence> dragNoteEdited;
+
     juce::TextButton zoomOutButton { "-" };
     juce::TextButton fitButton { "FIT" };
     juce::TextButton zoomInButton { "+" };
+    // Smaller text-button font for the MOVE/CUT/STRETCH strip: the
+    // default 15 pt button font is too wide for three labels in the
+    // bar-number strip. Derives from the app look-and-feel so only
+    // the font changes. Declared before the tool buttons so it is
+    // destroyed after them.
+    class SmallToolButtonLookAndFeel : public MelotheonLookAndFeel
+    {
+    public:
+        juce::Font getTextButtonFont (juce::TextButton&, int) override
+        {
+            return melotheon::melotheonFont (11.0f, true);
+        }
+    };
+    SmallToolButtonLookAndFeel smallToolButtonLookAndFeel;
+    juce::TextButton moveToolButton { "MOVE" };
+    juce::TextButton cutToolButton { "CUT" };
+    juce::TextButton stretchToolButton { "STRETCH" };
     juce::ScrollBar verticalScrollBar { true };
     float verticalZoom = 1.0f;
     int fittedLowestMidi = defaultLowestMidi;
