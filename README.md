@@ -98,10 +98,31 @@ MIDI notes. The same note sequence powers these features:
 - **MIDI chip:** one chip opens a small panel with two choices.
   **DRAG MIDI TO FL** starts a real OS file drag of a temp `.mid` so
   the melody can be dropped into FL Studio's Playlist or Channel
-  Rack. **EXPORT MIDI** runs the save-file flow above.
+  Rack. **EXPORT MIDI** runs the save-file flow above. A plain click
+  on the drag row shows "PRESS AND DRAG THIS ROW INTO FL STUDIO" in the status
+  LCD instead of doing nothing, and the same instruction is printed
+  as a caption under the rows so it is visible before any click;
+  while a drag is in flight the row stays highlighted orange. The
+  temp file is owned by the editor and deleted only after the drag
+  ends, so the panel cannot dismiss under a drag in flight.
 - **Draggable playhead:** grab the green playhead line in the piano
   roll and drag it left or right to seek; playback continues from
   the new position, or Play starts from there.
+- **Piano-key audition:** click a piano key on the left of the piano
+  roll and it really plays: the loaded one-shot pitched from its
+  detected root, or a built-in sine tone when no sound is loaded, so
+  a key always makes sound. Release the mouse (or slide off the key)
+  to stop it; sliding across keys while held re-triggers them. The
+  note name and Hertz show in the note LCD while the key is held.
+- **Manual pitch-curve correction:** the orange vocal pitch curve is
+  not a static picture. Grab it with the mouse and drag vertically
+  to correct the pitch at that time (semitone steps; the note name
+  shows in the note LCD while dragging). On release the frames near
+  the grab point are adjusted with a smooth falloff and the notes
+  are re-segmented, so the note blocks follow the corrected curve.
+  The status LCD notes "CURVE EDITED - RE-ANALYZE TO RESET": a later
+  RE-ANALYZE overwrites manual edits. The grey waveform is the
+  recorded audio and is never editable.
 - **Load Sound:** the folder button in INSTRUMENT loads a WAV, AIFF,
   FLAC or supported MP3 one-shot. Melotheon detects its root pitch,
   renders the sung timing with that sound off the audio thread and lets
@@ -111,7 +132,8 @@ MIDI notes. The same note sequence powers these features:
 
 ## What is NOT implemented yet
 
-- Manual note editing.
+- Direct note-block dragging (notes follow the corrected pitch curve,
+  but blocks themselves cannot be moved or resized with the mouse).
 - Third-party instrument hosting, choir generation, voice multiplication.
 - AI / ONNX models.
 - Real SEND TO CHANNEL and live MIDI output routing.
