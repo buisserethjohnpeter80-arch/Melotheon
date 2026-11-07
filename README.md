@@ -25,7 +25,7 @@ Every control is a real JUCE component. Knobs are draggable, dropdowns
 open with placeholder choices, and Record / Play / Stop change their
 visual selected state only.
 
-## Phase 2 — audio foundation (current)
+## Phase 2.1 — stable audio foundation (complete)
 
 Phase 2 connects the audio foundation to the Phase 1 interface, with
 no change to the layout, colours, sizes or brand text:
@@ -50,25 +50,71 @@ no change to the layout, colours, sizes or brand text:
   (play the loaded file / recorded clip).
 
 The active clip is an immutable `AudioClip` (original channels kept
-for preview, separate mono copy for future analysis) held as
-`std::atomic<std::shared_ptr<const AudioClip>>`.
+for preview, separate cancellation-safe mono copy for analysis). Ownership stays
+on the message thread. The audio callback reads a stable non-owning
+pointer, so `processBlock()` never performs shared-pointer reference
+counting or destruction.
+
+Phase 2.1 also hardens the working foundation:
+
+- Record and Play are mutually exclusive. Play finalizes a valid take;
+  Record stops and resets preview.
+- Stop waits for the current capture copy before publishing the clip.
+- An empty take reports NO INPUT and never replaces the active clip.
+- Stop/Pause always wins over an in-flight preview render.
+- Closing the editor while the file chooser is open is safe.
+- A pending import cannot replace a clip after Record or Play takes over.
+
+## Phase 3C — melody notes, MIDI and sample instrument (current)
+
+ANALYZE now performs real offline pitch tracking without changing the
+approved interface layout:
+
+- Voice, whistle, solo guitar and other one-note-at-a-time sources.
+- 55–2500 Hz working range, 24 kHz internal analysis rate and one
+  pitch/confidence frame every 10 ms.
+- Two-resolution YIN tracking: a longer low-frequency window plus a
+  short high-frequency window, harmonic selection and light glitch
+  stabilization.
+- Analysis runs on a cancellable worker thread. FL Studio's audio
+  callback and the plugin UI remain responsive.
+- The central editor overlays the real pitch curve on the waveform.
+  Its orange opacity reflects confidence and its keyboard range adapts
+  to the detected register.
+- The header shows the current note, Hertz and confidence while the
+  original clip plays. ANALYZING progress and NO STABLE PITCH are
+  explicit states.
+- Strong anti-phase stereo inputs cannot erase the analysis signal:
+  Melotheon selects the safer source channel while preserving the
+  original stereo audio for preview.
+
+The continuous curve is now converted into stable, non-overlapping
+notes. Five-frame median smoothing, pitch hysteresis, short-gap repair
+and minimum-note filtering keep normal vibrato from creating unwanted
+MIDI notes. The same note sequence powers these features:
+
+- **EXPORT MIDI:** saves a standard `.mid` file using the selected MIDI
+  channel and the current FL Studio tempo when available.
+- **Load Sound:** the folder button in INSTRUMENT loads a WAV, AIFF,
+  FLAC or supported MP3 one-shot. Melotheon detects its root pitch,
+  renders the sung timing with that sound off the audio thread and lets
+  PLAY INSTRUMENT preview it. Unpitched sounds safely default to C4.
+- **Professional piano navigation:** real note blocks, a wider keyboard,
+  FIT, `-` / `+` vertical zoom, a scrollbar and mouse-wheel scrolling.
 
 ## What is NOT implemented yet
 
-- Pitch detection, audio analysis, MIDI generation.
-- Instrument hosting, choir generation, voice multiplication.
+- Manual note editing and direct MIDI drag-and-drop into FL Studio.
+- Third-party instrument hosting, choir generation, voice multiplication.
 - AI / ONNX models.
-- Real Send to Channel / Drag MIDI behaviour.
-- ANALYZE, SEND TO CHANNEL, DRAG MIDI TO FL and PLAY INSTRUMENT
-  are still non-functional.
-
-These are marked `// TODO: PHASE_3_AUDIO_LOGIC` in the code.
+- Real SEND TO CHANNEL and live MIDI output routing.
 
 ## Build (Windows, GitHub Actions)
 
 Push to `main` (or run the workflow manually): the **Windows** workflow
-builds the VST3 on a `windows-latest` runner and uploads
-`melotheon-vst3` as an artifact. No local Visual Studio install needed.
+builds the VST3, executes the CTest suite, validates the real VST3 bundle
+with pluginval strictness level 5, then uploads `melotheon-vst3` as an
+artifact. No local Visual Studio install is needed.
 
 ## Build (local, Visual Studio 2022)
 
@@ -82,7 +128,7 @@ The `.vst3` bundle lands under
 (usually `C:\Program Files\Common Files\VST3\`) and rescan plugins in
 FL Studio.
 
-Run the Phase 2 unit tests after any build:
+Run the Phase 3C unit tests after any build:
 
 ```bat
 ctest --test-dir build -C Release --output-on-failure

@@ -11,15 +11,19 @@
 // inactive the processor passes host input through unchanged and
 // render() is never called.
 //
-// Thread safety: the clip is held as std::atomic<std::shared_ptr<
-// const AudioClip>>; the audio thread takes a local copy per block.
-// Playback position is an atomic double (in clip samples) updated
-// once per block. No allocation, no locks and no I/O in render().
+// Thread safety: the message thread owns the immutable AudioClip. The
+// audio thread receives a non-owning atomic pointer and announces each
+// render that is in flight. setClip() first removes that pointer, then
+// waits on the message thread before releasing the old owner. This keeps
+// shared_ptr reference counting and destruction off the audio thread.
+// Playback position is an atomic double (in clip samples) updated once
+// per block. No allocation, no locks and no I/O occur in render().
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 
 #include "AudioClip.h"
@@ -28,15 +32,14 @@ class AudioPreviewEngine
 {
 public:
     AudioPreviewEngine() = default;
+    ~AudioPreviewEngine();
 
     // Install a new clip (message thread). Stops any playback in
     // progress and resets the position to the start.
     void setClip (std::shared_ptr<const AudioClip> clip);
 
-    std::shared_ptr<const AudioClip> getClip() const
-    {
-        return clip.load (std::memory_order_acquire);
-    }
+    // Message thread only. The audio callback never copies a shared_ptr.
+    std::shared_ptr<const AudioClip> getClip() const { return ownedClip; }
 
     bool hasClip() const
     {
@@ -69,8 +72,16 @@ public:
     void render (juce::AudioBuffer<float>& buffer, double hostSampleRate);
 
 private:
-    std::atomic<std::shared_ptr<const AudioClip>> clip;
+    // Wait only on the message thread while replacing/destroying a clip.
+    void waitForRendererToFinish();
+
+    std::shared_ptr<const AudioClip> ownedClip; // message-thread owner
+    std::atomic<const AudioClip*> clipForAudio { nullptr };
+    std::atomic<int> renderersInFlight { 0 };
     std::atomic<bool> playing { false };
     std::atomic<double> positionSamples { 0.0 };
     std::atomic<bool> endedFlag { false };
+    // Stop, pause and clip replacement increment this token. render()
+    // publishes its final cursor only if its token is still current.
+    std::atomic<std::uint64_t> transportGeneration { 0 };
 };

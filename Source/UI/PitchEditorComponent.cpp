@@ -1,6 +1,7 @@
 // PitchEditorComponent implementation. All drawing is proportional to
 // the component bounds, so the editor stays aligned when resized.
-// Static placeholder data only - see the header.
+// Phase 3 adds a real confidence-weighted pitch curve, segmented note
+// blocks and a scrollable/zoomable vertical piano view.
 
 #include "PitchEditorComponent.h"
 #include "MelotheonLookAndFeel.h"
@@ -21,6 +22,43 @@ const PitchEditorComponent::Note PitchEditorComponent::placeholderNotes[] = {
     { 14.0, 2.0, 57 }, // A3
 };
 
+PitchEditorComponent::PitchEditorComponent()
+{
+    using namespace melotheon;
+    for (auto* button : { &zoomOutButton, &fitButton, &zoomInButton })
+    {
+        addAndMakeVisible (*button);
+        button->setColour (juce::TextButton::buttonColourId, Tokens::raisedPanel);
+        button->setColour (juce::TextButton::buttonOnColourId, Tokens::activeOrange);
+        button->setColour (juce::TextButton::textColourOffId, Tokens::primaryText);
+        button->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        button->setMouseClickGrabsKeyboardFocus (false);
+    }
+    zoomOutButton.setTooltip ("Reduce piano key height");
+    fitButton.setTooltip ("Fit detected melody");
+    zoomInButton.setTooltip ("Enlarge piano key height");
+    zoomOutButton.onClick = [this] { changeZoom (1.0f / 1.25f); };
+    zoomInButton.onClick = [this] { changeZoom (1.25f); };
+    fitButton.onClick = [this] { fitToContent(); };
+
+    addAndMakeVisible (verticalScrollBar);
+    verticalScrollBar.setAutoHide (false);
+    verticalScrollBar.setColour (juce::ScrollBar::backgroundColourId,
+                                 Tokens::pitchBackground.brighter (0.08f));
+    verticalScrollBar.setColour (juce::ScrollBar::thumbColourId,
+                                 Tokens::activeOrange.withAlpha (0.78f));
+    verticalScrollBar.setColour (juce::ScrollBar::trackColourId,
+                                 Tokens::border);
+    verticalScrollBar.addListener (this);
+
+    fitToContent();
+}
+
+PitchEditorComponent::~PitchEditorComponent()
+{
+    verticalScrollBar.removeListener (this);
+}
+
 bool PitchEditorComponent::isBlackKey (int midiNote) const
 {
     const int pc = midiNote % 12;
@@ -38,8 +76,39 @@ juce::String PitchEditorComponent::noteName (int midiNote) const
 void PitchEditorComponent::setClip (std::shared_ptr<const AudioClip> clip)
 {
     activeClip = std::move (clip);
+    pitchAnalysis.reset();
+    noteSequence.reset();
+    analysisProgress = -1.0f;
     rebuildWaveformCache();
     playheadSeconds = (activeClip != nullptr) ? 0.0 : -1.0;
+    fitToContent();
+}
+
+void PitchEditorComponent::setPitchAnalysis (
+    std::shared_ptr<const PitchAnalysisResult> analysis)
+{
+    pitchAnalysis = std::move (analysis);
+    analysisProgress = -1.0f;
+    fitToContent();
+}
+
+void PitchEditorComponent::setNoteSequence (
+    std::shared_ptr<const MelodyNoteSequence> notes)
+{
+    noteSequence = std::move (notes);
+    fitToContent();
+}
+
+void PitchEditorComponent::setAnalysisProgress (float progress)
+{
+    const float next = progress < 0.0f ? -1.0f : juce::jlimit (0.0f, 1.0f, progress);
+    const int oldPercent = analysisProgress < 0.0f
+        ? -1 : juce::roundToInt (analysisProgress * 100.0f);
+    const int newPercent = next < 0.0f ? -1 : juce::roundToInt (next * 100.0f);
+    if (oldPercent == newPercent)
+        return;
+
+    analysisProgress = next;
     repaint();
 }
 
@@ -59,6 +128,34 @@ void PitchEditorComponent::resized()
     // The peak cache is resolution-independent (fixed 1024 columns),
     // so a resize needs no rebuild; the playhead position is
     // re-derived from seconds in paint().
+    const int scrollWidth = static_cast<int> (scrollBarWidth);
+    verticalScrollBar.setBounds (getWidth() - scrollWidth,
+                                 static_cast<int> (barNumberHeight),
+                                 scrollWidth,
+                                 juce::jmax (0, getHeight() - static_cast<int> (barNumberHeight)));
+
+    const int buttonHeight = 20;
+    const int y = 3;
+    const int right = getWidth() - scrollWidth - 4;
+    zoomInButton.setBounds (right - 22, y, 22, buttonHeight);
+    fitButton.setBounds (right - 62, y, 36, buttonHeight);
+    zoomOutButton.setBounds (right - 88, y, 22, buttonHeight);
+    updateScrollBar();
+}
+
+void PitchEditorComponent::mouseWheelMove (
+    const juce::MouseEvent& event,
+    const juce::MouseWheelDetails& wheel)
+{
+    if (event.mods.isCtrlDown() || event.mods.isCommandDown())
+    {
+        changeZoom (wheel.deltaY >= 0.0f ? 1.25f : 1.0f / 1.25f);
+        return;
+    }
+
+    const double currentOffset = static_cast<double> (
+        absoluteHighestMidi - visibleHighestMidi);
+    setScrollOffset (currentOffset - static_cast<double> (wheel.deltaY) * 5.0);
 }
 
 void PitchEditorComponent::rebuildWaveformCache()
@@ -98,6 +195,126 @@ void PitchEditorComponent::rebuildWaveformCache()
     }
 }
 
+int PitchEditorComponent::fittedNoteCount() const
+{
+    return fittedHighestMidi - fittedLowestMidi + 1;
+}
+
+void PitchEditorComponent::fitToContent()
+{
+    int low = defaultLowestMidi;
+    int high = defaultHighestMidi;
+
+    if (noteSequence != nullptr && ! noteSequence->empty())
+    {
+        low = noteSequence->lowestMidi - 3;
+        high = noteSequence->highestMidi + 3;
+    }
+    else if (pitchAnalysis != nullptr && pitchAnalysis->hasPitch())
+    {
+        low = static_cast<int> (std::floor (pitchAnalysis->minMidi)) - 3;
+        high = static_cast<int> (std::ceil (pitchAnalysis->maxMidi)) + 3;
+    }
+
+    low = juce::jlimit (absoluteLowestMidi, absoluteHighestMidi, low);
+    high = juce::jlimit (absoluteLowestMidi, absoluteHighestMidi, high);
+    if (high < low)
+        std::swap (low, high);
+
+    // FIT never compresses the keyboard to more than two octaves unless the
+    // melody genuinely needs the extra range. A narrow melody gets at least
+    // 18 visible semitones, which makes the piano much easier to read.
+    constexpr int minimumFitNotes = 18;
+    const int currentCount = high - low + 1;
+    if (currentCount < minimumFitNotes)
+    {
+        const int missing = minimumFitNotes - currentCount;
+        low -= missing / 2;
+        high += missing - missing / 2;
+        if (low < absoluteLowestMidi)
+        {
+            high += absoluteLowestMidi - low;
+            low = absoluteLowestMidi;
+        }
+        if (high > absoluteHighestMidi)
+        {
+            low -= high - absoluteHighestMidi;
+            high = absoluteHighestMidi;
+        }
+    }
+
+    fittedLowestMidi = juce::jlimit (absoluteLowestMidi, absoluteHighestMidi, low);
+    fittedHighestMidi = juce::jlimit (fittedLowestMidi, absoluteHighestMidi, high);
+    visibleLowestMidi = fittedLowestMidi;
+    visibleHighestMidi = fittedHighestMidi;
+    verticalZoom = 1.0f;
+    updateScrollBar();
+    repaint();
+}
+
+void PitchEditorComponent::changeZoom (float multiplier)
+{
+    const float nextZoom = juce::jlimit (1.0f, 4.0f, verticalZoom * multiplier);
+    if (std::abs (nextZoom - verticalZoom) < 0.001f)
+        return;
+
+    const float centre = 0.5f * static_cast<float> (
+        visibleLowestMidi + visibleHighestMidi);
+    verticalZoom = nextZoom;
+    const int visibleCount = juce::jlimit (
+        7, absoluteHighestMidi - absoluteLowestMidi + 1,
+        static_cast<int> (std::lround (
+            static_cast<float> (fittedNoteCount()) / verticalZoom)));
+    int low = static_cast<int> (std::lround (centre - 0.5f * (visibleCount - 1)));
+    low = juce::jlimit (absoluteLowestMidi,
+                        absoluteHighestMidi - visibleCount + 1, low);
+    visibleLowestMidi = low;
+    visibleHighestMidi = low + visibleCount - 1;
+    updateScrollBar();
+    repaint();
+}
+
+void PitchEditorComponent::setScrollOffset (double requestedOffset)
+{
+    const int visibleCount = visibleHighestMidi - visibleLowestMidi + 1;
+    const int totalCount = absoluteHighestMidi - absoluteLowestMidi + 1;
+    const double offset = juce::jlimit (
+        0.0, static_cast<double> (juce::jmax (0, totalCount - visibleCount)),
+        requestedOffset);
+    visibleHighestMidi = absoluteHighestMidi
+                       - static_cast<int> (std::lround (offset));
+    visibleLowestMidi = visibleHighestMidi - visibleCount + 1;
+    updateScrollBar();
+    repaint();
+}
+
+void PitchEditorComponent::scrollBarMoved (
+    juce::ScrollBar* scrollBarThatHasMoved,
+    double newRangeStart)
+{
+    if (scrollBarThatHasMoved == &verticalScrollBar && ! updatingScrollBar)
+        setScrollOffset (newRangeStart);
+}
+
+void PitchEditorComponent::updateScrollBar()
+{
+    const int visibleCount = visibleHighestMidi - visibleLowestMidi + 1;
+    const int totalCount = absoluteHighestMidi - absoluteLowestMidi + 1;
+    const double offset = static_cast<double> (
+        absoluteHighestMidi - visibleHighestMidi);
+
+    updatingScrollBar = true;
+    verticalScrollBar.setRangeLimits (0.0, static_cast<double> (totalCount));
+    verticalScrollBar.setCurrentRange (
+        offset, static_cast<double> (visibleCount), juce::dontSendNotification);
+    updatingScrollBar = false;
+}
+
+std::pair<int, int> PitchEditorComponent::visibleMidiRange() const
+{
+    return { visibleLowestMidi, visibleHighestMidi };
+}
+
 void PitchEditorComponent::paint (juce::Graphics& g)
 {
     using namespace melotheon;
@@ -109,16 +326,24 @@ void PitchEditorComponent::paint (juce::Graphics& g)
 
     const float gridX = keyboardWidth;
     const float gridY = barNumberHeight;
-    const float gridW = width - keyboardWidth;
+    const float gridW = width - keyboardWidth - scrollBarWidth;
     const float gridH = height - barNumberHeight;
-    const int numRows = highestMidi - lowestMidi + 1; // 25 semitones
+    const auto [lowestMidi, highestMidi] = visibleMidiRange();
+    const int numRows = highestMidi - lowestMidi + 1;
     const float rowH = gridH / static_cast<float> (numRows);
     const float beatW = gridW / static_cast<float> (totalBeats);
 
-    auto midiToY = [&] (int midiNote) -> float
+    g.setFont (melotheonFont (10.0f, true));
+    g.setColour (Tokens::secondaryText);
+    g.drawText ("KEY ZOOM",
+                juce::Rectangle<float> (width - scrollBarWidth - 152.0f, 0.0f,
+                                        58.0f, barNumberHeight),
+                juce::Justification::centredRight, true);
+
+    auto midiToY = [&] (float midiNote) -> float
     {
         // Higher notes are higher on screen.
-        return gridY + static_cast<float> (highestMidi - midiNote) * rowH;
+        return gridY + (static_cast<float> (highestMidi) - midiNote) * rowH;
     };
     auto beatToX = [&] (double beat) -> float
     {
@@ -137,13 +362,15 @@ void PitchEditorComponent::paint (juce::Graphics& g)
     }
 
     // ---- Horizontal semitone lines; stronger lines on C (octaves). ----
-    for (int midi = lowestMidi; midi <= highestMidi + 1; ++midi)
+    for (int midi = lowestMidi; midi <= highestMidi; ++midi)
     {
-        const float y = midiToY (midi);
+        const float y = midiToY (static_cast<float> (midi));
         const bool isOctave = (midi % 12 == 0);
         g.setColour (isOctave ? Tokens::border.withAlpha (0.8f) : Tokens::gridLine);
-        g.drawLine (gridX, y, width, y, isOctave ? 1.0f : 0.5f);
+        g.drawLine (gridX, y, gridX + gridW, y, isOctave ? 1.0f : 0.5f);
     }
+    g.setColour (Tokens::border.withAlpha (0.8f));
+    g.drawLine (gridX, height, width, height, 1.0f);
 
     // ---- Vertical beat lines; stronger lines on bar starts. ----
     for (int beat = 0; beat <= totalBeats; ++beat)
@@ -151,7 +378,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         const float x = beatToX (beat);
         const bool isBar = (beat % beatsPerBar == 0);
         g.setColour (isBar ? Tokens::border.withAlpha (0.8f) : Tokens::gridLine);
-        g.drawLine (x, gridY, x, height, isBar ? 1.0f : 0.5f);
+            g.drawLine (x, gridY, x, gridY + gridH, isBar ? 1.0f : 0.5f);
     }
 
     if (activeClip != nullptr)
@@ -177,12 +404,107 @@ void PitchEditorComponent::paint (juce::Graphics& g)
             }
         }
 
-        // ---- Centered message: no pitch analysis has happened yet. ----
-        g.setFont (melotheonFont (13.0f, true));
-        g.setColour (Tokens::secondaryText);
-        g.drawText ("AUDIO READY \xC2\xB7 CLICK ANALYZE",
-                    juce::Rectangle<float> (gridX, gridY, gridW, gridH),
-                    juce::Justification::centred, true);
+        // ---- Segmented melody notes. ----
+        // These blocks are the stable notes used by both MIDI export and
+        // the sample instrument. The original confidence controls opacity,
+        // so uncertain detector edges remain visually honest.
+        if (noteSequence != nullptr && ! noteSequence->empty()
+            && activeClip->durationSeconds > 0.0)
+        {
+            for (const auto& note : noteSequence->notes)
+            {
+                if (note.midiNote < lowestMidi || note.midiNote > highestMidi)
+                    continue;
+
+                const double start = juce::jlimit (
+                    0.0, activeClip->durationSeconds, note.startSeconds);
+                const double end = juce::jlimit (
+                    start, activeClip->durationSeconds, note.endSeconds);
+                if (end <= start)
+                    continue;
+
+                const float x = gridX
+                    + static_cast<float> (start / activeClip->durationSeconds) * gridW;
+                const float right = gridX
+                    + static_cast<float> (end / activeClip->durationSeconds) * gridW;
+                const float y = midiToY (static_cast<float> (note.midiNote)) + 1.0f;
+                juce::Rectangle<float> block (
+                    x + 1.0f, y, juce::jmax (2.0f, right - x - 2.0f),
+                    juce::jmax (2.0f, rowH - 2.0f));
+                block = block.getIntersection (
+                    juce::Rectangle<float> (gridX, gridY, gridW, gridH));
+                if (block.isEmpty())
+                    continue;
+
+                const float confidence = juce::jlimit (0.0f, 1.0f, note.confidence);
+                g.setColour (Tokens::activeOrange.withAlpha (0.48f + confidence * 0.38f));
+                g.fillRoundedRectangle (block, juce::jmin (3.0f, block.getHeight() * 0.2f));
+                g.setColour (Tokens::brightOrange.withAlpha (0.72f + confidence * 0.28f));
+                g.drawRoundedRectangle (block,
+                                        juce::jmin (3.0f, block.getHeight() * 0.2f), 1.0f);
+
+                if (block.getWidth() >= 34.0f && block.getHeight() >= 12.0f)
+                {
+                    g.setFont (melotheonFont (juce::jlimit (8.0f, 11.0f,
+                                                           block.getHeight() * 0.62f), true));
+                    g.setColour (juce::Colours::black.withAlpha (0.76f));
+                    g.drawText (noteName (note.midiNote), block.reduced (4.0f, 0.0f),
+                                juce::Justification::centredLeft, true);
+                }
+            }
+        }
+
+        // ---- Real confidence-weighted pitch curve. ----
+        // Each adjacent voiced frame becomes one orange segment. The
+        // alpha follows detector confidence, so uncertain edges stay
+        // visible without looking as authoritative as stable pitch.
+        if (pitchAnalysis != nullptr && pitchAnalysis->hasPitch()
+            && activeClip->durationSeconds > 0.0)
+        {
+            const auto& frames = pitchAnalysis->frames;
+            for (size_t i = 1; i < frames.size(); ++i)
+            {
+                const auto& previous = frames[i - 1];
+                const auto& current = frames[i];
+                if (! previous.voiced || ! current.voiced)
+                    continue;
+                if (current.timeSeconds - previous.timeSeconds
+                    > pitchAnalysis->hopSeconds * 1.75)
+                    continue;
+
+                const float x1 = gridX + static_cast<float> (
+                    juce::jlimit (0.0, activeClip->durationSeconds, previous.timeSeconds)
+                    / activeClip->durationSeconds) * gridW;
+                const float x2 = gridX + static_cast<float> (
+                    juce::jlimit (0.0, activeClip->durationSeconds, current.timeSeconds)
+                    / activeClip->durationSeconds) * gridW;
+                const float y1 = midiToY (previous.midiPitch) + rowH * 0.5f;
+                const float y2 = midiToY (current.midiPitch) + rowH * 0.5f;
+                const float confidence = juce::jlimit (
+                    0.0f, 1.0f, 0.5f * (previous.confidence + current.confidence));
+
+                g.setColour (Tokens::brightOrange.withAlpha (0.35f + confidence * 0.65f));
+                g.drawLine (x1, y1, x2, y2, 1.3f + confidence * 0.9f);
+            }
+        }
+        else
+        {
+            g.setFont (melotheonFont (13.0f, true));
+            g.setColour (pitchAnalysis != nullptr
+                             ? Tokens::activeOrange : Tokens::secondaryText);
+            juce::String message;
+            if (analysisProgress >= 0.0f)
+                message = "ANALYZING "
+                        + juce::String (juce::roundToInt (analysisProgress * 100.0f)) + "%";
+            else if (pitchAnalysis != nullptr)
+                message = "NO STABLE PITCH FOUND";
+            else
+                message = "AUDIO READY \xC2\xB7 CLICK ANALYZE";
+
+            g.drawText (message,
+                        juce::Rectangle<float> (gridX, gridY, gridW, gridH),
+                        juce::Justification::centred, true);
+        }
     }
     else
     {
@@ -236,7 +558,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         const Note& note = placeholderNotes[i];
         const float x = beatToX (note.startBeat) + 1.0f;
         const float w = static_cast<float> (note.lengthBeats) * beatW - 2.0f;
-        const float y = midiToY (note.midiNote) + 1.0f;
+        const float y = midiToY (static_cast<float> (note.midiNote)) + 1.0f;
         const float h = rowH - 2.0f;
         juce::Rectangle<float> block (x, y, w, h);
 
@@ -261,15 +583,15 @@ void PitchEditorComponent::paint (juce::Graphics& g)
             const Note& note = placeholderNotes[i];
             const float x = beatToX (note.startBeat) + 1.0f;
             const float w = static_cast<float> (note.lengthBeats) * beatW - 2.0f;
-            const float y = midiToY (note.midiNote) + 1.0f;
+            const float y = midiToY (static_cast<float> (note.midiNote)) + 1.0f;
             const float h = rowH - 2.0f;
             const float centreY = y + h * 0.5f;
             const float prevCentreY = (i == 0)
                 ? centreY
-                : midiToY (placeholderNotes[i - 1].midiNote) + rowH * 0.5f;
+                : midiToY (static_cast<float> (placeholderNotes[i - 1].midiNote)) + rowH * 0.5f;
             const float nextCentreY = (i == numPlaceholderNotes - 1)
                 ? centreY
-                : midiToY (placeholderNotes[i + 1].midiNote) + rowH * 0.5f;
+                : midiToY (static_cast<float> (placeholderNotes[i + 1].midiNote)) + rowH * 0.5f;
             const float startY = juce::jlimit (y + 1.0f, y + h - 1.0f, prevCentreY);
             const float endY = juce::jlimit (y + 1.0f, y + h - 1.0f, nextCentreY);
             const int steps = 48;
@@ -310,7 +632,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         {
             if (isBlackKey (midi))
                 continue;
-            const float y = midiToY (midi);
+            const float y = midiToY (static_cast<float> (midi));
             g.setColour (juce::Colour (0xfff2f2f2));
             g.fillRect (0.0f, y, keyboardWidth, rowH);
             g.setColour (juce::Colour (0xff9a9a9a));
@@ -321,16 +643,18 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         {
             if (! isBlackKey (midi))
                 continue;
-            const float y = midiToY (midi);
+            const float y = midiToY (static_cast<float> (midi));
             g.setColour (juce::Colour (0xff1a1a1a));
             g.fillRect (0.0f, y, keyboardWidth * 0.62f, rowH);
         }
-        // C3 / C4 / C5 labels on the white C keys.
+        // Label every visible C key. The range remains C3-C5 until a
+        // real result needs a lower or higher register.
         g.setFont (melotheonFont (11.0f, true));
         g.setColour (juce::Colour (0xff333333));
-        for (int midi : { 48, 60, 72 })
+        const int firstC = ((lowestMidi + 11) / 12) * 12;
+        for (int midi = firstC; midi <= highestMidi; midi += 12)
         {
-            const float y = midiToY (midi);
+            const float y = midiToY (static_cast<float> (midi));
             g.drawText (noteName (midi),
                         juce::Rectangle<float> (keyboardWidth - 24.0f, y, 22.0f, rowH),
                         juce::Justification::centredLeft, true);
