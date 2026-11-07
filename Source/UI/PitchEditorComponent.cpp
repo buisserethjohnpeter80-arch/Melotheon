@@ -5,6 +5,7 @@
 
 #include "PitchEditorComponent.h"
 #include "MelotheonLookAndFeel.h"
+#include "../Analysis/NoteSegmenter.h"
 #include <cmath>
 
 const PitchEditorComponent::Note PitchEditorComponent::placeholderNotes[] = {
@@ -196,37 +197,241 @@ bool PitchEditorComponent::isNearPlayhead (float x) const
     return std::abs (x - playheadXForSeconds (playheadSeconds)) <= grabTolerance;
 }
 
+float PitchEditorComponent::rowHeightValue() const
+{
+    const int numRows = visibleHighestMidi - visibleLowestMidi + 1;
+    return (static_cast<float> (getHeight()) - barNumberHeight)
+         / static_cast<float> (juce::jmax (1, numRows));
+}
+
+float PitchEditorComponent::midiToYValue (float midiNote) const
+{
+    return barNumberHeight
+         + (static_cast<float> (visibleHighestMidi) - midiNote) * rowHeightValue();
+}
+
+float PitchEditorComponent::midiAtYValue (float y) const
+{
+    // Inverse of the curve's y (midiToY + half a row).
+    return static_cast<float> (visibleHighestMidi)
+         - (y - barNumberHeight - rowHeightValue() * 0.5f) / rowHeightValue();
+}
+
+int PitchEditorComponent::keyMidiAtY (float y) const
+{
+    const int midi = static_cast<int> (std::floor (
+        static_cast<float> (visibleHighestMidi)
+        - (y - barNumberHeight) / rowHeightValue()));
+    return juce::jlimit (visibleLowestMidi, visibleHighestMidi, midi);
+}
+
+bool PitchEditorComponent::curvePointNear (float x, float y,
+                                           double& secondsOut,
+                                           float& midiOut) const
+{
+    if (pitchAnalysis == nullptr || ! pitchAnalysis->hasPitch()
+        || activeClip == nullptr || activeClip->durationSeconds <= 0.0
+        || pitchAnalysis->hopSeconds <= 0.0
+        || pitchAnalysis->frames.empty())
+        return false;
+
+    const double seconds = secondsForX (x);
+    if (seconds < 0.0)
+        return false;
+
+    const int centre = juce::jlimit (
+        0, static_cast<int> (pitchAnalysis->frames.size()) - 1,
+        static_cast<int> (std::llround (seconds / pitchAnalysis->hopSeconds)));
+
+    // The curve between frames is a straight segment, so the nearest
+    // of the centre frame and its neighbours is close enough for an
+    // 8 px grab tolerance.
+    float bestDistance = curveGrabTolerancePx;
+    bool found = false;
+    for (int offset = -2; offset <= 2; ++offset)
+    {
+        const int i = centre + offset;
+        if (i < 0 || i >= static_cast<int> (pitchAnalysis->frames.size()))
+            continue;
+        const auto& frame = pitchAnalysis->frames[static_cast<size_t> (i)];
+        if (! frame.voiced)
+            continue;
+        const float px = playheadXForSeconds (frame.timeSeconds);
+        const float py = midiToYValue (frame.midiPitch) + rowHeightValue() * 0.5f;
+        const float distance = std::hypot (x - px, y - py);
+        if (distance <= bestDistance)
+        {
+            bestDistance = distance;
+            secondsOut = frame.timeSeconds;
+            midiOut = frame.midiPitch;
+            found = true;
+        }
+    }
+    return found;
+}
+
+void PitchEditorComponent::applyCurveDragAt (float x, float y)
+{
+    if (dragCurveEdited == nullptr || dragCurveOriginal == nullptr)
+        return;
+
+    const double seconds = secondsForX (x);
+    if (seconds < 0.0)
+        return;
+
+    // Semitone resolution: the curve snaps to whole notes while
+    // dragging, and the editor shows the note name in the note LCD.
+    const int targetMidi = juce::jlimit (
+        24, 108, juce::roundToInt (midiAtYValue (y)));
+
+    // Recompute from the drag-start snapshot every move: the edit is
+    // one application of the current target, never an accumulation.
+    *dragCurveEdited = *dragCurveOriginal;
+    NoteSegmenter::applyCurveEdit (
+        *dragCurveEdited, seconds,
+        static_cast<float> (targetMidi), curveEditWindowSeconds);
+
+    if (onCurveEditNote != nullptr)
+        onCurveEditNote (targetMidi);
+    repaint();
+}
+
 void PitchEditorComponent::mouseDown (const juce::MouseEvent& event)
 {
     draggingPlayhead = false;
-    if (isNearPlayhead (event.position.x))
+    draggingCurve = false;
+    dragCurveOriginal.reset();
+    dragCurveEdited.reset();
+
+    const float x = event.position.x;
+    const float y = event.position.y;
+
+    // Piano keyboard (left of the grid): audition the key. Keys are
+    // left of the grid and the playhead/curve are inside it, so the
+    // two gestures can never overlap.
+    if (x < keyboardWidth && y >= barNumberHeight)
+    {
+        auditionMidi = keyMidiAtY (y);
+        if (onAuditionStart != nullptr)
+            onAuditionStart (auditionMidi);
+        repaint();
+        return;
+    }
+    if (x < keyboardWidth || activeClip == nullptr)
+        return; // bar-number strip / keyboard edge: nothing to grab
+
+    // Grid: nearest target wins; the green playhead wins a tie.
+    if (isNearPlayhead (x))
+    {
         draggingPlayhead = true;
+        return;
+    }
+
+    double curveSeconds = 0.0;
+    float curveMidi = 0.0f;
+    if (curvePointNear (x, y, curveSeconds, curveMidi))
+    {
+        dragCurveOriginal = pitchAnalysis;
+        dragCurveEdited = std::make_shared<PitchAnalysisResult> (*pitchAnalysis);
+        draggingCurve = true;
+        applyCurveDragAt (x, y);
+    }
 }
 
 void PitchEditorComponent::mouseDrag (const juce::MouseEvent& event)
 {
-    if (! draggingPlayhead)
-        return;
+    if (draggingPlayhead)
+    {
+        const double seconds = secondsForX (event.position.x);
+        if (seconds < 0.0)
+            return;
 
-    const double seconds = secondsForX (event.position.x);
-    if (seconds < 0.0)
+        if (onPlayheadSeek != nullptr)
+            onPlayheadSeek (seconds);
+        setPlayheadPosition (seconds);
         return;
+    }
 
-    if (onPlayheadSeek != nullptr)
-        onPlayheadSeek (seconds);
-    setPlayheadPosition (seconds);
+    if (draggingCurve)
+    {
+        applyCurveDragAt (event.position.x, event.position.y);
+        return;
+    }
+
+    // Audition: sliding across keys while held re-triggers the key
+    // under the mouse (glissando). Outside the keyboard the last key
+    // keeps sounding until release.
+    if (auditionMidi >= 0 && event.position.x < keyboardWidth
+        && event.position.y >= barNumberHeight)
+    {
+        const int midi = keyMidiAtY (event.position.y);
+        if (midi != auditionMidi)
+        {
+            auditionMidi = midi;
+            if (onAuditionStart != nullptr)
+                onAuditionStart (midi);
+            repaint();
+        }
+    }
 }
 
 void PitchEditorComponent::mouseUp (const juce::MouseEvent&)
 {
     draggingPlayhead = false;
+
+    if (draggingCurve)
+    {
+        draggingCurve = false;
+        if (dragCurveEdited != nullptr && onCurveEditCommitted != nullptr)
+            onCurveEditCommitted (dragCurveEdited);
+        dragCurveOriginal.reset();
+        dragCurveEdited.reset();
+    }
+
+    if (auditionMidi >= 0)
+    {
+        auditionMidi = -1;
+        if (onAuditionStop != nullptr)
+            onAuditionStop();
+        repaint();
+    }
+}
+
+void PitchEditorComponent::mouseExit (const juce::MouseEvent&)
+{
+    // Safety net: a key held while the mouse leaves the component
+    // must not keep sounding (mouseUp normally covers release).
+    if (auditionMidi >= 0)
+    {
+        auditionMidi = -1;
+        if (onAuditionStop != nullptr)
+            onAuditionStop();
+        repaint();
+    }
 }
 
 void PitchEditorComponent::mouseMove (const juce::MouseEvent& event)
 {
-    setMouseCursor (isNearPlayhead (event.position.x)
-        ? juce::MouseCursor::LeftRightResizeCursor
-        : juce::MouseCursor::NormalCursor);
+    if (event.position.x < keyboardWidth
+        && event.position.y >= barNumberHeight)
+    {
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        return;
+    }
+    if (isNearPlayhead (event.position.x))
+    {
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        return;
+    }
+    double curveSeconds = 0.0;
+    float curveMidi = 0.0f;
+    if (curvePointNear (event.position.x, event.position.y,
+                        curveSeconds, curveMidi))
+    {
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        return;
+    }
+    setMouseCursor (juce::MouseCursor::NormalCursor);
 }
 
 void PitchEditorComponent::rebuildWaveformCache()
@@ -529,10 +734,15 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         // Each adjacent voiced frame becomes one orange segment. The
         // alpha follows detector confidence, so uncertain edges stay
         // visible without looking as authoritative as stable pitch.
-        if (pitchAnalysis != nullptr && pitchAnalysis->hasPitch()
+        // While the user drags the curve, paint the working copy so
+        // the line follows the mouse; the stored analysis only changes
+        // on release (commit).
+        const PitchAnalysisResult* curveSource = dragCurveEdited != nullptr
+            ? dragCurveEdited.get() : pitchAnalysis.get();
+        if (curveSource != nullptr && curveSource->hasPitch()
             && activeClip->durationSeconds > 0.0)
         {
-            const auto& frames = pitchAnalysis->frames;
+            const auto& frames = curveSource->frames;
             for (size_t i = 1; i < frames.size(); ++i)
             {
                 const auto& previous = frames[i - 1];
@@ -540,7 +750,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
                 if (! previous.voiced || ! current.voiced)
                     continue;
                 if (current.timeSeconds - previous.timeSeconds
-                    > pitchAnalysis->hopSeconds * 1.75)
+                    > curveSource->hopSeconds * 1.75)
                     continue;
 
                 const float x1 = gridX + static_cast<float> (
@@ -698,13 +908,15 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         // White-key background first.
         g.setColour (juce::Colour (0xffe8e8e8));
         g.fillRect (0.0f, gridY, keyboardWidth, gridH);
-        // White keys: one rectangle per white note.
+        // White keys: one rectangle per white note. The held audition
+        // key lights up orange.
         for (int midi = lowestMidi; midi <= highestMidi; ++midi)
         {
             if (isBlackKey (midi))
                 continue;
             const float y = midiToY (static_cast<float> (midi));
-            g.setColour (juce::Colour (0xfff2f2f2));
+            g.setColour (midi == auditionMidi ? Tokens::activeOrange
+                                             : juce::Colour (0xfff2f2f2));
             g.fillRect (0.0f, y, keyboardWidth, rowH);
             g.setColour (juce::Colour (0xff9a9a9a));
             g.drawLine (0.0f, y + rowH, keyboardWidth, y + rowH, 0.5f);
@@ -715,7 +927,8 @@ void PitchEditorComponent::paint (juce::Graphics& g)
             if (! isBlackKey (midi))
                 continue;
             const float y = midiToY (static_cast<float> (midi));
-            g.setColour (juce::Colour (0xff1a1a1a));
+            g.setColour (midi == auditionMidi ? Tokens::brightOrange
+                                             : juce::Colour (0xff1a1a1a));
             g.fillRect (0.0f, y, keyboardWidth * 0.62f, rowH);
         }
         // Label every visible C key. The range remains C3-C5 until a
