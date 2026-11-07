@@ -18,7 +18,39 @@ float readInterpolated (const float* source, int sourceSamples, double position)
     const float fraction = static_cast<float> (position - static_cast<double> (index0));
     return source[index0] + (source[index1] - source[index0]) * fraction;
 }
+
+// Median pitch of an analyzed one-shot as a MIDI note. Unpitched,
+// noisy or unanalyzable sounds fall back to middle C rather than
+// rejecting a sound the user deliberately chose.
+int rootMidiFromAnalysis (const PitchAnalysisResult* pitchResult)
+{
+    if (pitchResult != nullptr && pitchResult->hasPitch()
+        && pitchResult->medianFrequencyHz > 0.0f)
+    {
+        return std::clamp (static_cast<int> (std::lround (
+            69.0 + 12.0 * std::log2 (
+                static_cast<double> (pitchResult->medianFrequencyHz) / 440.0))),
+            0, 127);
+    }
+    return 60;
+}
 } // namespace
+
+int SampleInstrumentRenderer::detectRootMidi (const AudioClip& oneShot)
+{
+    if (oneShot.isEmpty() || oneShot.sourceSampleRate <= 0.0)
+        return 60;
+
+    PitchAnalysisSettings pitchSettings;
+    pitchSettings.silenceThresholdDb = -66.0f;
+    pitchSettings.minimumConfidence = 0.45f;
+    auto pitchResult = MonophonicPitchAnalyzer::analyze (
+        oneShot.analysisMonoBuffer, oneShot.sourceSampleRate, pitchSettings);
+
+    if (pitchResult == nullptr)
+        return 60;
+    return rootMidiFromAnalysis (pitchResult.get());
+}
 
 SampleRenderResult SampleInstrumentRenderer::render (
     const AudioClip& oneShot,
@@ -72,19 +104,10 @@ SampleRenderResult SampleInstrumentRenderer::render (
     // Pitched sounds get automatic root-note detection. For noise,
     // percussion or very short attacks, use middle C rather than rejecting
     // a sound the user deliberately chose.
-    if (pitchResult->hasPitch() && pitchResult->medianFrequencyHz > 0.0f)
-    {
-        result.rootFrequencyHz = pitchResult->medianFrequencyHz;
-        result.rootMidi = std::clamp (static_cast<int> (std::lround (
-            69.0 + 12.0 * std::log2 (
-                static_cast<double> (result.rootFrequencyHz) / 440.0))),
-            0, 127);
-    }
-    else
-    {
-        result.rootMidi = 60;
-        result.rootFrequencyHz = 261.6256f;
-    }
+    result.rootMidi = rootMidiFromAnalysis (pitchResult.get());
+    result.rootFrequencyHz = (pitchResult->hasPitch()
+                              && pitchResult->medianFrequencyHz > 0.0f)
+        ? pitchResult->medianFrequencyHz : 261.6256f;
 
     const double renderDuration = std::clamp (
         std::max (melody.durationSeconds,
