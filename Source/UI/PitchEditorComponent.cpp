@@ -192,7 +192,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
     // ---- Horizontal semitone lines; stronger lines on C (octaves). ----
     for (int midi = lowestMidi; midi <= highestMidi; ++midi)
     {
-        const float y = midiToY (midi);
+        const float y = midiToY (static_cast<float> (midi));
         const bool isOctave = (midi % 12 == 0);
         g.setColour (isOctave ? Tokens::border.withAlpha (0.8f) : Tokens::gridLine);
         g.drawLine (gridX, y, width, y, isOctave ? 1.0f : 0.5f);
@@ -336,7 +336,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         const Note& note = placeholderNotes[i];
         const float x = beatToX (note.startBeat) + 1.0f;
         const float w = static_cast<float> (note.lengthBeats) * beatW - 2.0f;
-        const float y = midiToY (note.midiNote) + 1.0f;
+        const float y = midiToY (static_cast<float> (note.midiNote)) + 1.0f;
         const float h = rowH - 2.0f;
         juce::Rectangle<float> block (x, y, w, h);
 
@@ -361,15 +361,15 @@ void PitchEditorComponent::paint (juce::Graphics& g)
             const Note& note = placeholderNotes[i];
             const float x = beatToX (note.startBeat) + 1.0f;
             const float w = static_cast<float> (note.lengthBeats) * beatW - 2.0f;
-            const float y = midiToY (note.midiNote) + 1.0f;
+            const float y = midiToY (static_cast<float> (note.midiNote)) + 1.0f;
             const float h = rowH - 2.0f;
             const float centreY = y + h * 0.5f;
             const float prevCentreY = (i == 0)
                 ? centreY
-                : midiToY (placeholderNotes[i - 1].midiNote) + rowH * 0.5f;
+                : midiToY (static_cast<float> (placeholderNotes[i - 1].midiNote)) + rowH * 0.5f;
             const float nextCentreY = (i == numPlaceholderNotes - 1)
                 ? centreY
-                : midiToY (placeholderNotes[i + 1].midiNote) + rowH * 0.5f;
+                : midiToY (static_cast<float> (placeholderNotes[i + 1].midiNote)) + rowH * 0.5f;
             const float startY = juce::jlimit (y + 1.0f, y + h - 1.0f, prevCentreY);
             const float endY = juce::jlimit (y + 1.0f, y + h - 1.0f, nextCentreY);
             const int steps = 48;
@@ -410,7 +410,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         {
             if (isBlackKey (midi))
                 continue;
-            const float y = midiToY (midi);
+            const float y = midiToY (static_cast<float> (midi));
             g.setColour (juce::Colour (0xfff2f2f2));
             g.fillRect (0.0f, y, keyboardWidth, rowH);
             g.setColour (juce::Colour (0xff9a9a9a));
@@ -421,7 +421,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         {
             if (! isBlackKey (midi))
                 continue;
-            const float y = midiToY (midi);
+            const float y = midiToY (static_cast<float> (midi));
             g.setColour (juce::Colour (0xff1a1a1a));
             g.fillRect (0.0f, y, keyboardWidth * 0.62f, rowH);
         }
@@ -432,7 +432,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         const int firstC = ((lowestMidi + 11) / 12) * 12;
         for (int midi = firstC; midi <= highestMidi; midi += 12)
         {
-            const float y = midiToY (midi);
+            const float y = midiToY (static_cast<float> (midi));
             g.drawText (noteName (midi),
                         juce::Rectangle<float> (keyboardWidth - 24.0f, y, 22.0f, rowH),
                         juce::Justification::centredLeft, true);
