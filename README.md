@@ -1,1 +1,150 @@
-IyBNZWxvdGhlb24KCk1lbG90aGVvbiBpcyBhIHByb2Zlc3Npb25hbCBXaW5kb3dzIFZTVDMgcGx1Z2luIGZvciBGTCBTdHVkaW86IGNhcHR1cmUgYQptZWxvZHkgKHZvaWNlLCBndWl0YXIsIHBpYW5vKSBhbmQgdHVybiBpdCBpbnRvIE1JREkgb24gYSBjaGFubmVsCmluc3RydW1lbnQuCgojIyBQaGFzZSAxIOKAlCB2aXN1YWwgaW50ZXJmYWNlIChjb21wbGV0ZSkKClRoaXMgcGhhc2UgYnVpbGRzIHRoZSAqKmNvbXBsZXRlIHZpc3VhbCBpbnRlcmZhY2Ugb25seSoqOgoKLSBIZWFkZXIgd2l0aCB0aGUgY3VzdG9tIE1lbG90aGVvbiAiTSIgbW9ub2dyYW0sIE1FTE9USMOJT04gYnJhbmQsCiAgUmVjb3JkIC8gUGxheSAvIFN0b3AgdHJhbnNwb3J0IGJ1dHRvbnMsIGlucHV0IHNlbGVjdG9yLCBSRUFEWSBzdGF0dXMKICBMQ0QgYW5kIGRldGVjdGVkLW5vdGUgTENELgotIExlZnQgY2FwdHVyZSBwYW5lbDogSU1QT1JUIEFVRElPLCBNT05PIHRvZ2dsZSwgTk9JU0UgR0FURSBrbm9iIGFuZCBhCiAgdmVydGljYWwgbGV2ZWwgbWV0ZXIuCi0gQ2VudGVyIHBpYW5vLXJvbGwgZWRpdG9yOiBkYXJrIGdyaWQsIHBpYW5vIGtleWJvYXJkIChDM+KAk0M1KSwgYmFyCiAgbnVtYmVycyAx4oCTNCwgc3RhdGljIHBsYWNlaG9sZGVyIG5vdGVzIHdpdGggcGl0Y2ggY3VydmVzLCBhIGdyZXkKICB3YXZlZm9ybSBhbmQgYSBncmVlbiBwbGF5aGVhZCDigJQgYWxsIGRyYXduIHByb2dyYW1tYXRpY2FsbHkuCi0gUmlnaHQgaW5zdHJ1bWVudCBwYW5lbDogaW5zdHJ1bWVudCBzZWxlY3RvciwgTUlESSBPVVQgdG9nZ2xlLCBNSURJCiAgY2hhbm5lbCBzZWxlY3RvciwgRFJBRyBNSURJIFRPIEZMLCBQTEFZIE9SSUdJTkFMLCBQTEFZIElOU1RSVU1FTlQuCi0gQm90dG9tIGNvcnJlY3Rpb24gc3RyaXA6IENFTlRFUiwgVkFSSUFUSU9OLCBUUkFOU0lUSU9OLCBTRU5TSVRJVklUWQogIGFuZCBRVUFOVElaRSBrbm9icywgS0VZIGRpc3BsYXksIEFOQUxZWkUgYW5kIFNFTkQgVE8gQ0hBTk5FTC4KCkV2ZXJ5IGNvbnRyb2wgaXMgYSByZWFsIEpVQ0UgY29tcG9uZW50LiBLbm9icyBhcmUgZHJhZ2dhYmxlLCBkcm9wZG93bnMKb3BlbiB3aXRoIHBsYWNlaG9sZGVyIGNob2ljZXMsIGFuZCBSZWNvcmQgLyBQbGF5IC8gU3RvcCBjaGFuZ2UgdGhlaXIKdmlzdWFsIHNlbGVjdGVkIHN0YXRlIG9ubHkuCgojIyBQaGFzZSAyLjEg4oCUIHN0YWJsZSBhdWRpbyBmb3VuZGF0aW9uIChjb21wbGV0ZSkKClBoYXNlIDIgY29ubmVjdHMgdGhlIGF1ZGlvIGZvdW5kYXRpb24gdG8gdGhlIFBoYXNlIDEgaW50ZXJmYWNlLCB3aXRoCm5vIGNoYW5nZSB0byB0aGUgbGF5b3V0LCBjb2xvdXJzLCBzaXplcyBvciBicmFuZCB0ZXh0OgoKLSAqKkxpdmUgY2FwdHVyZToqKiBhdWRpbyBhcnJpdmluZyBmcm9tIHRoZSBGTCBTdHVkaW8gTWl4ZXIgVHJhY2sKICB0aHJvdWdoIGBwcm9jZXNzQmxvY2soKWAgaXMgcmVjb3JkZWQgaW50byBhIHByZWFsbG9jYXRlZCA2MCBzCiAgYnVmZmVyIChSZWNvcmQgLyBTdG9wKS4gTm8gYWxsb2NhdGlvbiBoYXBwZW5zIGluIGBwcm9jZXNzQmxvY2soKWAuCi0gKipJbXBvcnQgQXVkaW86KiogV0FWLCBBSUZGIGFuZCBGTEFDIChwbHVzIE1QMyB3aGVuIHRoZSBKVUNFCiAgY29uZmlndXJhdGlvbiBlbmFibGVzIGl0KSBhcmUgZGVjb2RlZCBvbiBhIHdvcmtlciB0aHJlYWQgdmlhCiAgYGp1Y2U6OkZpbGVDaG9vc2VyOjpsYXVuY2hBc3luYygpYDsgdGhlIFVJIG5ldmVyIGZyZWV6ZXMuCi0gKipQcmV2aWV3OioqIFBsYXkgLyBTdG9wIC8gUGxheSBPcmlnaW5hbCBwbGF5IHRoZSBhY3RpdmUgY2xpcAogIHRocm91Z2ggdGhlIE1peGVyIFRyYWNrLCByZXNhbXBsZWQgdG8gdGhlIGhvc3QgcmF0ZSBzbyBzcGVlZCBhbmQKICBwaXRjaCBzdGF5IGNvcnJlY3QuIFRoZSBncmVlbiBwbGF5aGVhZCBmb2xsb3dzIHBsYXliYWNrLgotICoqTWV0ZXI6KiogdGhlIHZlcnRpY2FsIG1ldGVyIHNob3dzIHRoZSByZWFsIHNtb290aGVkIGlucHV0IHBlYWsKICAoLTYwLi4wIGRCOyBncmVlbiAtNjAuLi0xMiwgeWVsbG93IC0xMi4uLTMsIG9yYW5nZSBhYm92ZSAtMykuCi0gKipXYXZlZm9ybToqKiB0aGUgcmVhbCBjbGlwIHdhdmVmb3JtIHJlcGxhY2VzIHRoZSBwbGFjZWhvbGRlcjsgdGhlCiAgcGxhY2Vob2xkZXIgbm90ZXMgYXJlIGhpZGRlbiBhbmQgdGhlIGVkaXRvciBzaG93cwogICJBVURJTyBSRUFEWSDCtyBDTElDSyBBTkFMWVpFIi4KLSAqKlN0YXR1cyBMQ0Q6KiogUkVBRFkgLyBMT0FESU5HIC8gUkVDT1JESU5HIC8gQVVESU8gUkVBRFkgLwogIFBMQVlJTkcgLyBTVE9QUEVEIC8gTk8gSU5QVVQgLyBFUlJPUiAvIExJTUlUIFJFQUNIRUQgLyBFTVBUWSBTT1VSQ0UuCi0gKipJbnB1dCBzb3VyY2U6KiogTElWRSBJTlBVVCAocmVjb3JkIGhvc3QgYXVkaW8pIG9yIElNUE9SVEVEIEFVRElPCiAgKHBsYXkgdGhlIGxvYWRlZCBmaWxlIC8gcmVjb3JkZWQgY2xpcCkuCgpUaGUgYWN0aXZlIGNsaXAgaXMgYW4gaW1tdXRhYmxlIGBBdWRpb0NsaXBgIChvcmlnaW5hbCBjaGFubmVscyBrZXB0CmZvciBwcmV2aWV3LCBzZXBhcmF0ZSBjYW5jZWxsYXRpb24tc2FmZSBtb25vIGNvcHkgZm9yIGFuYWx5c2lzKS4gT3duZXJzaGlwIHN0YXlzCm9uIHRoZSBtZXNzYWdlIHRocmVhZC4gVGhlIGF1ZGlvIGNhbGxiYWNrIHJlYWRzIGEgc3RhYmxlIG5vbi1vd25pbmcKcG9pbnRlciwgc28gYHByb2Nlc3NCbG9jaygpYCBuZXZlciBwZXJmb3JtcyBzaGFyZWQtcG9pbnRlciByZWZlcmVuY2UKY291bnRpbmcgb3IgZGVzdHJ1Y3Rpb24uCgpQaGFzZSAyLjEgYWxzbyBoYXJkZW5zIHRoZSB3b3JraW5nIGZvdW5kYXRpb246CgotIFJlY29yZCBhbmQgUGxheSBhcmUgbXV0dWFsbHkgZXhjbHVzaXZlLiBQbGF5IGZpbmFsaXplcyBhIHZhbGlkIHRha2U7CiAgUmVjb3JkIHN0b3BzIGFuZCByZXNldHMgcHJldmlldy4KLSBTdG9wIHdhaXRzIGZvciB0aGUgY3VycmVudCBjYXB0dXJlIGNvcHkgYmVmb3JlIHB1Ymxpc2hpbmcgdGhlIGNsaXAuCi0gQW4gZW1wdHkgdGFrZSByZXBvcnRzIE5PIElOUFVUIGFuZCBuZXZlciByZXBsYWNlcyB0aGUgYWN0aXZlIGNsaXAuCi0gU3RvcC9QYXVzZSBhbHdheXMgd2lucyBvdmVyIGFuIGluLWZsaWdodCBwcmV2aWV3IHJlbmRlci4KLSBDbG9zaW5nIHRoZSBlZGl0b3Igd2hpbGUgdGhlIGZpbGUgY2hvb3NlciBpcyBvcGVuIGlzIHNhZmUuCi0gQSBwZW5kaW5nIGltcG9ydCBjYW5ub3QgcmVwbGFjZSBhIGNsaXAgYWZ0ZXIgUmVjb3JkIG9yIFBsYXkgdGFrZXMgb3Zlci4KCiMjIFBoYXNlIDNDIOKAlCBtZWxvZHkgbm90ZXMsIE1JREkgYW5kIHNhbXBsZSBpbnN0cnVtZW50IChjdXJyZW50KQoKQU5BTFlaRSBub3cgcGVyZm9ybXMgcmVhbCBvZmZsaW5lIHBpdGNoIHRyYWNraW5nIHdpdGhvdXQgY2hhbmdpbmcgdGhlCmFwcHJvdmVkIGludGVyZmFjZSBsYXlvdXQ6CgotIFZvaWNlLCB3aGlzdGxlLCBzb2xvIGd1aXRhciBhbmQgb3RoZXIgb25lLW5vdGUtYXQtYS10aW1lIHNvdXJjZXMuCi0gNTXigJMyNTAwIEh6IHdvcmtpbmcgcmFuZ2UsIDI0IGtIeiBpbnRlcm5hbCBhbmFseXNpcyByYXRlIGFuZCBvbmUKICBwaXRjaC9jb25maWRlbmNlIGZyYW1lIGV2ZXJ5IDEwIG1zLgotIFR3by1yZXNvbHV0aW9uIFlJTiB0cmFja2luZzogYSBsb25nZXIgbG93LWZyZXF1ZW5jeSB3aW5kb3cgcGx1cyBhCiAgc2hvcnQgaGlnaC1mcmVxdWVuY3kgd2luZG93LCBoYXJtb25pYyBzZWxlY3Rpb24gYW5kIGxpZ2h0IGdsaXRjaAogIHN0YWJpbGl6YXRpb24uCi0gQW5hbHlzaXMgcnVucyBvbiBhIGNhbmNlbGxhYmxlIHdvcmtlciB0aHJlYWQuIEZMIFN0dWRpbydzIGF1ZGlvCiAgY2FsbGJhY2sgYW5kIHRoZSBwbHVnaW4gVUkgcmVtYWluIHJlc3BvbnNpdmUuCi0gVGhlIGNlbnRyYWwgZWRpdG9yIG92ZXJsYXlzIHRoZSByZWFsIHBpdGNoIGN1cnZlIG9uIHRoZSB3YXZlZm9ybS4KICBJdHMgb3JhbmdlIG9wYWNpdHkgcmVmbGVjdHMgY29uZmlkZW5jZSBhbmQgaXRzIGtleWJvYXJkIHJhbmdlIGFkYXB0cwogIHRvIHRoZSBkZXRlY3RlZCByZWdpc3Rlci4KLSBUaGUgaGVhZGVyIHNob3dzIHRoZSBjdXJyZW50IG5vdGUsIEhlcnR6IGFuZCBjb25maWRlbmNlIHdoaWxlIHRoZQogIG9yaWdpbmFsIGNsaXAgcGxheXMuIEFOQUxZWklORyBwcm9ncmVzcyBhbmQgTk8gU1RBQkxFIFBJVENIIGFyZQogIGV4cGxpY2l0IHN0YXRlcy4KLSBTdHJvbmcgYW50aS1waGFzZSBzdGVyZW8gaW5wdXRzIGNhbm5vdCBlcmFzZSB0aGUgYW5hbHlzaXMgc2lnbmFsOgogIE1lbG90aGVvbiBzZWxlY3RzIHRoZSBzYWZlciBzb3VyY2UgY2hhbm5lbCB3aGlsZSBwcmVzZXJ2aW5nIHRoZQogIG9yaWdpbmFsIHN0ZXJlbyBhdWRpbyBmb3IgcHJldmlldy4KClRoZSBjb250aW51b3VzIGN1cnZlIGlzIG5vdyBjb252ZXJ0ZWQgaW50byBzdGFibGUsIG5vbi1vdmVybGFwcGluZwpub3Rlcy4gRml2ZS1mcmFtZSBtZWRpYW4gc21vb3RoaW5nLCBwaXRjaCBoeXN0ZXJlc2lzLCBzaG9ydC1nYXAgcmVwYWlyCmFuZCBtaW5pbXVtLW5vdGUgZmlsdGVyaW5nIGtlZXAgbm9ybWFsIHZpYnJhdG8gZnJvbSBjcmVhdGluZyB1bndhbnRlZApNSURJIG5vdGVzLiBUaGUgc2FtZSBub3RlIHNlcXVlbmNlIHBvd2VycyB0aGVzZSBmZWF0dXJlczoKCi0gKipFWFBPUlQgTUlESToqKiBzYXZlcyBhIHN0YW5kYXJkIGAubWlkYCBmaWxlIHVzaW5nIHRoZSBzZWxlY3RlZCBNSURJCiAgY2hhbm5lbCBhbmQgdGhlIGN1cnJlbnQgRkwgU3R1ZGlvIHRlbXBvIHdoZW4gYXZhaWxhYmxlLgotICoqTUlESSBjaGlwOioqIG9uZSBjaGlwIG9wZW5zIGEgc21hbGwgcGFuZWwgd2l0aCB0d28gY2hvaWNlcy4KICAqKkRSQUcgTUlESSBUTyBGTCoqIHN0YXJ0cyBhIHJlYWwgT1MgZmlsZSBkcmFnIG9mIGEgdGVtcCBgLm1pZGAgc28KICB0aGUgbWVsb2R5IGNhbiBiZSBkcm9wcGVkIGludG8gRkwgU3R1ZGlvJ3MgUGxheWxpc3Qgb3IgQ2hhbm5lbAogIFJhY2suICoqRVhQT1JUIE1JREkqKiBydW5zIHRoZSBzYXZlLWZpbGUgZmxvdyBhYm92ZS4KLSAqKkRyYWdnYWJsZSBwbGF5aGVhZDoqKiBncmFiIHRoZSBncmVlbiBwbGF5aGVhZCBsaW5lIGluIHRoZSBwaWFubwogIHJvbGwgYW5kIGRyYWcgaXQgbGVmdCBvciByaWdodCB0byBzZWVrOyBwbGF5YmFjayBjb250aW51ZXMgZnJvbQogIHRoZSBuZXcgcG9zaXRpb24sIG9yIFBsYXkgc3RhcnRzIGZyb20gdGhlcmUuCi0gKipMb2FkIFNvdW5kOioqIHRoZSBmb2xkZXIgYnV0dG9uIGluIElOU1RSVU1FTlQgbG9hZHMgYSBXQVYsIEFJRkYsCiAgRkxBQyBvciBzdXBwb3J0ZWQgTVAzIG9uZS1zaG90LiBNZWxvdGhlb24gZGV0ZWN0cyBpdHMgcm9vdCBwaXRjaCwKICByZW5kZXJzIHRoZSBzdW5nIHRpbWluZyB3aXRoIHRoYXQgc291bmQgb2ZmIHRoZSBhdWRpbyB0aHJlYWQgYW5kIGxldHMKICBQTEFZIElOU1RSVU1FTlQgcHJldmlldyBpdC4gVW5waXRjaGVkIHNvdW5kcyBzYWZlbHkgZGVmYXVsdCB0byBDNC4KLSAqKlByb2Zlc3Npb25hbCBwaWFubyBuYXZpZ2F0aW9uOioqIHJlYWwgbm90ZSBibG9ja3MsIGEgd2lkZXIga2V5Ym9hcmQsCiAgRklULCBgLWAgLyBgK2AgdmVydGljYWwgem9vbSwgYSBzY3JvbGxiYXIgYW5kIG1vdXNlLXdoZWVsIHNjcm9sbGluZy4KCiMjIFdoYXQgaXMgTk9UIGltcGxlbWVudGVkIHlldAoKLSBNYW51YWwgbm90ZSBlZGl0aW5nLgotIFRoaXJkLXBhcnR5IGluc3RydW1lbnQgaG9zdGluZywgY2hvaXIgZ2VuZXJhdGlvbiwgdm9pY2UgbXVsdGlwbGljYXRpb24uCi0gQUkgLyBPTk5YIG1vZGVscy4KLSBSZWFsIFNFTkQgVE8gQ0hBTk5FTCBhbmQgbGl2ZSBNSURJIG91dHB1dCByb3V0aW5nLgoKIyMgQnVpbGQgKFdpbmRvd3MsIEdpdEh1YiBBY3Rpb25zKQoKUHVzaCB0byBgbWFpbmAgKG9yIHJ1biB0aGUgd29ya2Zsb3cgbWFudWFsbHkpOiB0aGUgKipXaW5kb3dzKiogd29ya2Zsb3cKYnVpbGRzIHRoZSBWU1QzLCBleGVjdXRlcyB0aGUgQ1Rlc3Qgc3VpdGUsIHZhbGlkYXRlcyB0aGUgcmVhbCBWU1QzIGJ1bmRsZQp3aXRoIHBsdWdpbnZhbCBzdHJpY3RuZXNzIGxldmVsIDUsIHRoZW4gdXBsb2FkcyBgbWVsb3RoZW9uLXZzdDNgIGFzIGFuCmFydGlmYWN0LiBObyBsb2NhbCBWaXN1YWwgU3R1ZGlvIGluc3RhbGwgaXMgbmVlZGVkLgoKIyMgQnVpbGQgKGxvY2FsLCBWaXN1YWwgU3R1ZGlvIDIwMjIpCgpgYGBiYXQKY21ha2UgLVMgLiAtQiBidWlsZCAtQSB4NjQKY21ha2UgLS1idWlsZCBidWlsZCAtLWNvbmZpZyBSZWxlYXNlCmBgYAoKVGhlIGAudnN0M2AgYnVuZGxlIGxhbmRzIHVuZGVyCmBidWlsZC9NZWxvdGhlb25fYXJ0ZWZhY3RzL1JlbGVhc2UvVlNUMy9gLiBDb3B5IGl0IHRvIHRoZSBWU1QzIGZvbGRlcgoodXN1YWxseSBgQzpcUHJvZ3JhbSBGaWxlc1xDb21tb24gRmlsZXNcVlNUM1xgKSBhbmQgcmVzY2FuIHBsdWdpbnMgaW4KRkwgU3R1ZGlvLgoKUnVuIHRoZSBQaGFzZSAzQyB1bml0IHRlc3RzIGFmdGVyIGFueSBidWlsZDoKCmBgYGJhdApjdGVzdCAtLXRlc3QtZGlyIGJ1aWxkIC1DIFJlbGVhc2UgLS1vdXRwdXQtb24tZmFpbHVyZQpgYGAKCiMjIFRlY2gKCi0gQysrMjAsIEpVQ0UgOC4wLjggKHBpbm5lZCB2aWEgRmV0Y2hDb250ZW50KSwgQ01ha2UsIFZTVDMgb25seS4KLSBFZGl0b3I6IDE0MDAgw5cgNTYwIGRlZmF1bHQgKDEwMDAgw5cgNDAwIG1pbiwgMTgwMCDDlyA3MjAgbWF4KSwKICBhc3BlY3QtcmF0aW8tcHJlc2VydmluZyByZXNpemUsIEhpRFBJLXNhZmUuCi0gRGVzaWduIHRva2VucyAoY29sb3VycywgZm9udHMsIHNpemVzKSBsaXZlIGluCiAgYFNvdXJjZS9VSS9NZWxvdGhlb25Mb29rQW5kRmVlbC5oYCDigJQgb25lIGNlbnRyYWwgcGxhY2UuCg==
+# Melotheon
+
+Melotheon is a professional Windows VST3 plugin for FL Studio: capture a
+melody (voice, guitar, piano) and turn it into MIDI on a channel
+instrument.
+
+## Phase 1 — visual interface (complete)
+
+This phase builds the **complete visual interface only**:
+
+- Header with the custom Melotheon "M" monogram, MELOTHÉON brand,
+  Record / Play / Stop transport buttons, input selector, READY status
+  LCD and detected-note LCD.
+- Left capture panel: IMPORT AUDIO, MONO toggle, NOISE GATE knob and a
+  vertical level meter.
+- Center piano-roll editor: dark grid, piano keyboard (C3–C5), bar
+  numbers 1–4, static placeholder notes with pitch curves, a grey
+  waveform and a green playhead — all drawn programmatically.
+- Right instrument panel: instrument selector, MIDI OUT toggle, MIDI
+  channel selector, DRAG MIDI TO FL, PLAY ORIGINAL, PLAY INSTRUMENT.
+- Bottom correction strip: CENTER, VARIATION, TRANSITION, SENSITIVITY
+  and QUANTIZE knobs, KEY display, ANALYZE and SEND TO CHANNEL.
+
+Every control is a real JUCE component. Knobs are draggable, dropdowns
+open with placeholder choices, and Record / Play / Stop change their
+visual selected state only.
+
+## Phase 2.1 — stable audio foundation (complete)
+
+Phase 2 connects the audio foundation to the Phase 1 interface, with
+no change to the layout, colours, sizes or brand text:
+
+- **Live capture:** audio arriving from the FL Studio Mixer Track
+  through `processBlock()` is recorded into a preallocated 60 s
+  buffer (Record / Stop). No allocation happens in `processBlock()`.
+- **Import Audio:** WAV, AIFF and FLAC (plus MP3 when the JUCE
+  configuration enables it) are decoded on a worker thread via
+  `juce::FileChooser::launchAsync()`; the UI never freezes.
+- **Preview:** Play / Stop / Play Original play the active clip
+  through the Mixer Track, resampled to the host rate so speed and
+  pitch stay correct. The green playhead follows playback.
+- **Meter:** the vertical meter shows the real smoothed input peak
+  (-60..0 dB; green -60..-12, yellow -12..-3, orange above -3).
+- **Waveform:** the real clip waveform replaces the placeholder; the
+  placeholder notes are hidden and the editor shows
+  "AUDIO READY · CLICK ANALYZE".
+- **Status LCD:** READY / LOADING / RECORDING / AUDIO READY /
+  PLAYING / STOPPED / NO INPUT / ERROR / LIMIT REACHED / EMPTY SOURCE.
+- **Input source:** LIVE INPUT (record host audio) or IMPORTED AUDIO
+  (play the loaded file / recorded clip).
+
+The active clip is an immutable `AudioClip` (original channels kept
+for preview, separate cancellation-safe mono copy for analysis). Ownership stays
+on the message thread. The audio callback reads a stable non-owning
+pointer, so `processBlock()` never performs shared-pointer reference
+counting or destruction.
+
+Phase 2.1 also hardens the working foundation:
+
+- Record and Play are mutually exclusive. Play finalizes a valid take;
+  Record stops and resets preview.
+- Stop waits for the current capture copy before publishing the clip.
+- An empty take reports NO INPUT and never replaces the active clip.
+- Stop/Pause always wins over an in-flight preview render.
+- Closing the editor while the file chooser is open is safe.
+- A pending import cannot replace a clip after Record or Play takes over.
+
+## Phase 3C — melody notes, MIDI and sample instrument (current)
+
+ANALYZE now performs real offline pitch tracking without changing the
+approved interface layout:
+
+- Voice, whistle, solo guitar and other one-note-at-a-time sources.
+- 55–2500 Hz working range, 24 kHz internal analysis rate and one
+  pitch/confidence frame every 10 ms.
+- Two-resolution YIN tracking: a longer low-frequency window plus a
+  short high-frequency window, harmonic selection and light glitch
+  stabilization.
+- Analysis runs on a cancellable worker thread. FL Studio's audio
+  callback and the plugin UI remain responsive.
+- The central editor overlays the real pitch curve on the waveform.
+  Its orange opacity reflects confidence and its keyboard range adapts
+  to the detected register.
+- The header shows the current note, Hertz and confidence while the
+  original clip plays. ANALYZING progress and NO STABLE PITCH are
+  explicit states.
+- Strong anti-phase stereo inputs cannot erase the analysis signal:
+  Melotheon selects the safer source channel while preserving the
+  original stereo audio for preview.
+
+The continuous curve is now converted into stable, non-overlapping
+notes. Five-frame median smoothing, pitch hysteresis, short-gap repair
+and minimum-note filtering keep normal vibrato from creating unwanted
+MIDI notes. The same note sequence powers these features:
+
+- **EXPORT MIDI:** saves a standard `.mid` file using the selected MIDI
+  channel and the current FL Studio tempo when available.
+- **MIDI chip:** one chip opens a small panel with two choices.
+  **DRAG MIDI TO FL** starts a real OS file drag of a temp `.mid` so
+  the melody can be dropped into FL Studio's Playlist or Channel
+  Rack. **EXPORT MIDI** runs the save-file flow above.
+- **Draggable playhead:** grab the green playhead line in the piano
+  roll and drag it left or right to seek; playback continues from
+  the new position, or Play starts from there.
+- **Load Sound:** the folder button in INSTRUMENT loads a WAV, AIFF,
+  FLAC or supported MP3 one-shot. Melotheon detects its root pitch,
+  renders the sung timing with that sound off the audio thread and lets
+  PLAY INSTRUMENT preview it. Unpitched sounds safely default to C4.
+- **Professional piano navigation:** real note blocks, a wider keyboard,
+  FIT, `-` / `+` vertical zoom, a scrollbar and mouse-wheel scrolling.
+
+## What is NOT implemented yet
+
+- Manual note editing.
+- Third-party instrument hosting, choir generation, voice multiplication.
+- AI / ONNX models.
+- Real SEND TO CHANNEL and live MIDI output routing.
+
+## Build (Windows, GitHub Actions)
+
+Push to `main` (or run the workflow manually): the **Windows** workflow
+builds the VST3, executes the CTest suite, validates the real VST3 bundle
+with pluginval strictness level 5, then uploads `melotheon-vst3` as an
+artifact. No local Visual Studio install is needed.
+
+## Build (local, Visual Studio 2022)
+
+```bat
+cmake -S . -B build -A x64
+cmake --build build --config Release
+```
+
+The `.vst3` bundle lands under
+`build/Melotheon_artefacts/Release/VST3/`. Copy it to the VST3 folder
+(usually `C:\Program Files\Common Files\VST3\`) and rescan plugins in
+FL Studio.
+
+Run the Phase 3C unit tests after any build:
+
+```bat
+ctest --test-dir build -C Release --output-on-failure
+```
+
+## Tech
+
+- C++20, JUCE 8.0.8 (pinned via FetchContent), CMake, VST3 only.
+- Editor: 1400 × 560 default (1000 × 400 min, 1800 × 720 max),
+  aspect-ratio-preserving resize, HiDPI-safe.
+- Design tokens (colours, fonts, sizes) live in
+  `Source/UI/MelotheonLookAndFeel.h` — one central place.
