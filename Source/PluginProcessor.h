@@ -1,1 +1,331 @@
-I3ByYWdtYSBvbmNlCgovLyBNZWxvdGhlb25BdWRpb1Byb2Nlc3NvciAtIHRoZSBWU1QzIGF1ZGlvIHByb2Nlc3NvciAoUGhhc2UgM0IvM0MpLgovLwovLyBUaGUgUGhhc2UgMiBBVURJTyBGT1VOREFUSU9OIHByb3ZpZGVzOgovLyAgICogTGl2ZSBjYXB0dXJlOiBob3N0IGF1ZGlvIGZyb20gdGhlIEZMIFN0dWRpbyBNaXhlciBUcmFjayBpcwovLyAgICAgcmVjb3JkZWQgaW50byBhIHByZWFsbG9jYXRlZCA2MCBzIGJ1ZmZlciAoQXVkaW9DYXB0dXJlRW5naW5lKS4KLy8gICAqIEltcG9ydDogV0FWIC8gQUlGRiAvIEZMQUMgKCsgTVAzIHdoZW4gSlVDRSBlbmFibGVzIGl0KSBmaWxlcwovLyAgICAgYXJlIGRlY29kZWQgb24gYSB3b3JrZXIgdGhyZWFkIChBdWRpb0ZpbGVMb2FkZXIpLgovLyAgICogUHJldmlldzogdGhlIGFjdGl2ZSBBdWRpb0NsaXAgcGxheXMgYmFjayB0aHJvdWdoIHRoZSBNaXhlcgovLyAgICAgVHJhY2ssIHJlc2FtcGxlZCB0byB0aGUgaG9zdCByYXRlIChBdWRpb1ByZXZpZXdFbmdpbmUpLgovLyAgICogSW5wdXQgbWV0ZXI6IHJlYWwgUk1TIC8gcGVhayBsZXZlbHMgZnJvbSB0aGUgaW5jb21pbmcgc2lnbmFsLgovLyAgICogU3RhdHVzOiBSRUFEWSAvIExPQURJTkcgLyBSRUNPUkRJTkcgLyBBVURJTyBSRUFEWSAvIFBMQVlJTkcgLwovLyAgICAgU1RPUFBFRCAvIE5PIElOUFVUIC8gRVJST1IgLyBMSU1JVCBSRUFDSEVEIC8gRU1QVFkgU09VUkNFLgovLwovLyBQaGFzZSAzIGFkZHMgb2ZmbGluZSBtb25vcGhvbmljIHBpdGNoIGRldGVjdGlvbiwgc3RhYmxlIG5vdGUKLy8gc2VnbWVudGF0aW9uLCBzdGFuZGFyZCBNSURJLWZpbGUgZXhwb3J0IGFuZCBzYW1wbGUtaW5zdHJ1bWVudCBwcmV2aWV3LgovLyBJbnN0cnVtZW50IHJlbmRlcmluZyBhbHNvIHJ1bnMgb24gYSB3b3JrZXIgdGhyZWFkLiBWb2ljZSBtdWx0aXBsaWNhdGlvbiwKLy8gY2hvaXIgZ2VuZXJhdGlvbiwgQUkgYW5kIHRoaXJkLXBhcnR5IGluc3RydW1lbnQgaG9zdGluZyByZW1haW4gbGF0ZXIgd29yay4KLy8KLy8gVGhyZWFkIHNhZmV0eTogcHJvY2Vzc0Jsb2NrKCkgbmV2ZXIgYWxsb2NhdGVzLCBuZXZlciBsb2NrcywgbmV2ZXIKLy8gdG91Y2hlcyBmaWxlcyBvciB0aGUgVUksIGFuZCBuZXZlciBjaGFuZ2VzIHNoYXJlZF9wdHIgb3duZXJzaGlwLiBUaGUKLy8gaW1tdXRhYmxlIGFjdGl2ZSBjbGlwIGlzIG93bmVkIG9uIHRoZSBtZXNzYWdlIHRocmVhZC4gQXVkaW9QcmV2aWV3RW5naW5lCi8vIGhhbmRzIGEgc3RhYmxlIHJhdyBwb2ludGVyIHRvIHRoZSBhdWRpbyBjYWxsYmFjayBhbmQgZGVmZXJzIG93bmVyc2hpcAovLyBjaGFuZ2VzIHVudGlsIGFueSBpbi1mbGlnaHQgcmVuZGVyIGZpbmlzaGVzLiBSZWNvcmRpbmcsIHBsYXliYWNrIGFuZAovLyBmaWxlIGxvYWRpbmcgdXNlIGF0b21pY3Mgb3IgZXhwbGljaXQgbWVzc2FnZS10aHJlYWQgaGFuZG9mZnMuCi8vCi8vIFRoZSBBdWRpb1Byb2Nlc3NvclZhbHVlVHJlZVN0YXRlIGhvbGRzIHRoZSBpbnRlcmZhY2UgcGFyYW1ldGVycyBzbwovLyB0aGUgZWRpdG9yIHN0YXRlIHBlcnNpc3RzIGluIHRoZSBob3N0IHByb2plY3QuIFRoZSBhdWRpbyByZWNvcmRpbmcKLy8gaXRzZWxmIGlzIE5PVCBzZXJpYWxpemVkIGludG8gcGx1Z2luIHN0YXRlOiBhIHByb2plY3QgcmVsb2FkCi8vIHdpdGhvdXQgaXRzIHRlbXBvcmFyeSBjbGlwIHJldHVybnMgc2FmZWx5IHRvIFJFQURZIC8gRU1QVFkgU09VUkNFLgoKI2luY2x1ZGUgPEp1Y2VIZWFkZXIuaD4KCiNpbmNsdWRlIDxhdG9taWM+CiNpbmNsdWRlIDxtZW1vcnk+CgojaW5jbHVkZSAiQXVkaW8vQXVkaW9DYXB0dXJlRW5naW5lLmgiCiNpbmNsdWRlICJBdWRpby9BdWRpb0ZpbGVMb2FkZXIuaCIKI2luY2x1ZGUgIkF1ZGlvL0F1ZGlvUHJldmlld0VuZ2luZS5oIgojaW5jbHVkZSAiQXVkaW8vU2FtcGxlUmVuZGVyRW5naW5lLmgiCiNpbmNsdWRlICJBbmFseXNpcy9NZWxvZHlOb3Rlcy5oIgojaW5jbHVkZSAiQW5hbHlzaXMvUGl0Y2hBbmFseXNpc0VuZ2luZS5oIgoKY2xhc3MgTWVsb3RoZW9uQXVkaW9Qcm9jZXNzb3IgOiBwdWJsaWMganVjZTo6QXVkaW9Qcm9jZXNzb3IKewpwdWJsaWM6CiAgICBlbnVtIGNsYXNzIFN0YXR1cwogICAgewogICAgICAgIFJlYWR5ID0gMCwKICAgICAgICBMb2FkaW5nLAogICAgICAgIFJlY29yZGluZywKICAgICAgICBBdWRpb1JlYWR5LAogICAgICAgIFBsYXlpbmcsCiAgICAgICAgU3RvcHBlZCwKICAgICAgICBOb0lucHV0LAogICAgICAgIEVycm9yLAogICAgICAgIExpbWl0UmVhY2hlZCwKICAgICAgICBFbXB0eVNvdXJjZSwKICAgICAgICBBbmFseXppbmcsCiAgICAgICAgQW5hbHlzaXNSZWFkeSwKICAgICAgICBOb1BpdGNoLAogICAgICAgIExvYWRpbmdTb3VuZCwKICAgICAgICBTb3VuZFJlYWR5LAogICAgICAgIFJlbmRlcmluZ0luc3RydW1lbnQsCiAgICAgICAgSW5zdHJ1bWVudFJlYWR5LAogICAgICAgIFBsYXlpbmdJbnN0cnVtZW50LAogICAgICAgIE1pZGlFeHBvcnRlZAogICAgfTsKCiAgICBlbnVtIGNsYXNzIElucHV0U291cmNlCiAgICB7CiAgICAgICAgTGl2ZSA9IDAsICAgICAgLy8gY2FwdHVyZSBob3N0IGF1ZGlvIHdpdGggUmVjb3JkCiAgICAgICAgSW1wb3J0ZWQgPSAxICAgLy8gcGxheSB0aGUgbG9hZGVkIGZpbGUgLyByZWNvcmRlZCBjbGlwCiAgICB9OwoKICAgIE1lbG90aGVvbkF1ZGlvUHJvY2Vzc29yKCk7CiAgICB+TWVsb3RoZW9uQXVkaW9Qcm9jZXNzb3IoKSBvdmVycmlkZTsKCiAgICAvLyBVbi1oaWRlIHRoZSBiYXNlLWNsYXNzIGRvdWJsZS1wcmVjaXNpb24gcHJvY2Vzc0Jsb2NrIG92ZXJsb2FkCiAgICAvLyAodGhpcyBjbGFzcyBvdmVycmlkZXMgdGhlIGZsb2F0IHZlcnNpb24gb25seTsgd2l0aG91dCB0aGlzIEdDQwogICAgLy8gd2FybnMgLVdvdmVybG9hZGVkLXZpcnR1YWwpLgogICAgdXNpbmcganVjZTo6QXVkaW9Qcm9jZXNzb3I6OnByb2Nlc3NCbG9jazsKCiAgICAvLyBBdWRpb1Byb2Nlc3NvciBib2lsZXJwbGF0ZSAoSlVDRSA4KS4KICAgIHZvaWQgcHJlcGFyZVRvUGxheSAoZG91YmxlIHNhbXBsZVJhdGUsIGludCBzYW1wbGVzUGVyQmxvY2spIG92ZXJyaWRlOwogICAgdm9pZCByZWxlYXNlUmVzb3VyY2VzKCkgb3ZlcnJpZGU7CiAgICBib29sIGlzQnVzZXNMYXlvdXRTdXBwb3J0ZWQgKGNvbnN0IEJ1c2VzTGF5b3V0JiBsYXlvdXRzKSBjb25zdCBvdmVycmlkZTsKICAgIHZvaWQgcHJvY2Vzc0Jsb2NrIChqdWNlOjpBdWRpb0J1ZmZlcjxmbG9hdD4mIGJ1ZmZlciwganVjZTo6TWlkaUJ1ZmZlciYgbWlkaU1lc3NhZ2VzKSBvdmVycmlkZTsKICAgIGp1Y2U6OkF1ZGlvUHJvY2Vzc29yRWRpdG9yKiBjcmVhdGVFZGl0b3IoKSBvdmVycmlkZTsKICAgIGJvb2wgaGFzRWRpdG9yKCkgY29uc3Qgb3ZlcnJpZGUgeyByZXR1cm4gdHJ1ZTsgfQoKICAgIGNvbnN0IGp1Y2U6OlN0cmluZyBnZXROYW1lKCkgY29uc3Qgb3ZlcnJpZGUgeyByZXR1cm4gIk1lbG90aGVvbiI7IH0KICAgIGJvb2wgYWNjZXB0c01pZGkoKSBjb25zdCBvdmVycmlkZSB7IHJldHVybiBmYWxzZTsgfQogICAgYm9vbCBwcm9kdWNlc01pZGkoKSBjb25zdCBvdmVycmlkZSB7IHJldHVybiBmYWxzZTsgfQogICAgYm9vbCBpc01pZGlFZmZlY3QoKSBjb25zdCBvdmVycmlkZSB7IHJldHVybiBmYWxzZTsgfQogICAgZG91YmxlIGdldFRhaWxMZW5ndGhTZWNvbmRzKCkgY29uc3Qgb3ZlcnJpZGUgeyByZXR1cm4gMC4wOyB9CiAgICBpbnQgZ2V0TnVtUHJvZ3JhbXMoKSBvdmVycmlkZSB7IHJldHVybiAxOyB9CiAgICBpbnQgZ2V0Q3VycmVudFByb2dyYW0oKSBvdmVycmlkZSB7IHJldHVybiAwOyB9CiAgICB2b2lkIHNldEN1cnJlbnRQcm9ncmFtIChpbnQpIG92ZXJyaWRlIHt9CiAgICBjb25zdCBqdWNlOjpTdHJpbmcgZ2V0UHJvZ3JhbU5hbWUgKGludCkgb3ZlcnJpZGUgeyByZXR1cm4ge307IH0KICAgIHZvaWQgY2hhbmdlUHJvZ3JhbU5hbWUgKGludCwgY29uc3QganVjZTo6U3RyaW5nJikgb3ZlcnJpZGUge30KICAgIHZvaWQgZ2V0U3RhdGVJbmZvcm1hdGlvbiAoanVjZTo6TWVtb3J5QmxvY2smIGRlc3REYXRhKSBvdmVycmlkZTsKICAgIHZvaWQgc2V0U3RhdGVJbmZvcm1hdGlvbiAoY29uc3Qgdm9pZCogZGF0YSwgaW50IHNpemVJbkJ5dGVzKSBvdmVycmlkZTsKCiAgICAvLyAtLS0tIEF1ZGlvICsgUGhhc2UgMyBwdWJsaWMgQVBJIChlZGl0b3IgKyB0ZXN0cykgLS0tLQoKICAgIElucHV0U291cmNlIGdldElucHV0U291cmNlKCkgY29uc3Q7CgogICAgU3RhdHVzIGdldFN0YXR1cygpIGNvbnN0CiAgICB7CiAgICAgICAgcmV0dXJuIHN0YXRpY19jYXN0PFN0YXR1cz4gKHN0YXR1cy5sb2FkIChzdGQ6Om1lbW9yeV9vcmRlcl9hY3F1aXJlKSk7CiAgICB9CgogICAgdm9pZCBzZXRTdGF0dXMgKFN0YXR1cyBuZXdTdGF0dXMpCiAgICB7CiAgICAgICAgc3RhdHVzLnN0b3JlIChzdGF0aWNfY2FzdDxpbnQ+IChuZXdTdGF0dXMpLCBzdGQ6Om1lbW9yeV9vcmRlcl9yZWxlYXNlKTsKICAgIH0KCiAgICAvLyBTaG9ydCBMQ0QgdGV4dCBmb3IgdGhlIGN1cnJlbnQgc3RhdHVzLiBNZXNzYWdlIHRocmVhZCBvbmx5CiAgICAvLyAocmVhZHMgbGFzdEVycm9yTWVzc2FnZSkuIEZvciBFcnJvciB0aGlzIGlzIHRoZSBlcnJvciBtZXNzYWdlLgogICAganVjZTo6U3RyaW5nIGdldFN0YXR1c1RleHQoKSBjb25zdDsKCiAgICAvLyBNZXNzYWdlIHRocmVhZCBvbmx5LiBUaGUgYXVkaW8gY2FsbGJhY2sgZG9lcyBub3QgYWNjZXNzIHRoaXMgb3duZXIuCiAgICBzdGQ6OnNoYXJlZF9wdHI8Y29uc3QgQXVkaW9DbGlwPiBnZXRBY3RpdmVDbGlwKCkgY29uc3QgeyByZXR1cm4gYWN0aXZlQ2xpcDsgfQoKICAgIGJvb2wgaGFzQWN0aXZlQ2xpcCgpIGNvbnN0CiAgICB7CiAgICAgICAgYXV0byBjbGlwID0gZ2V0QWN0aXZlQ2xpcCgpOwogICAgICAgIHJldHVybiBjbGlwICE9IG51bGxwdHIgJiYgISBjbGlwLT5pc0VtcHR5KCk7CiAgICB9CgogICAgLy8gSW5jcmVtZW50cyBldmVyeSB0aW1lIGEgbmV3IGNsaXAgYmVjb21lcyBhY3RpdmUuIFRoZSBlZGl0b3IKICAgIC8vIHBvbGxzIGl0IHRvIGtub3cgd2hlbiB0byByZWZyZXNoIHRoZSB3YXZlZm9ybS4KICAgIGludCBnZXRDbGlwVmVyc2lvbigpIGNvbnN0IHsgcmV0dXJuIGNsaXBWZXJzaW9uLmxvYWQgKHN0ZDo6bWVtb3J5X29yZGVyX2FjcXVpcmUpOyB9CgogICAgLy8gU21vb3RoZWQgaW5wdXQgbGV2ZWxzIGluIGRCLCByYW5nZSAtNjAuLjAuIFRoZSBlZGl0b3IgcmVhZHMKICAgIC8vIHRoZW0gfjMweC9zZWNvbmQgZm9yIHRoZSBtZXRlci4KICAgIGZsb2F0IGdldElucHV0UGVha0RiKCkgY29uc3QgeyByZXR1cm4gaW5wdXRQZWFrRGIubG9hZCAoc3RkOjptZW1vcnlfb3JkZXJfYWNxdWlyZSk7IH0KICAgIGZsb2F0IGdldElucHV0Um1zRGIoKSBjb25zdCB7IHJldHVybiBpbnB1dFJtc0RiLmxvYWQgKHN0ZDo6bWVtb3J5X29yZGVyX2FjcXVpcmUpOyB9CgogICAgLy8gUmVjb3JkaW5nIChtZXNzYWdlIHRocmVhZCkuIHN0YXJ0UmVjb3JkaW5nKCkgcmV0dXJucyBmYWxzZQogICAgLy8gd2hlbiB0aGUgaW5wdXQgc291cmNlIGlzIG5vdCBMSVZFIElOUFVUIChzdGF0dXMgYmVjb21lcyBFcnJvcgogICAgLy8gd2l0aCAiVVNFIExJVkUgSU5QVVQiKSBvciBhIHRha2UgaXMgYWxyZWFkeSBydW5uaW5nLgogICAgYm9vbCBzdGFydFJlY29yZGluZygpOwogICAgLy8gU3RvcCBhbmQgZmluYWxpemUgdGhlIHRha2UgaW50byB0aGUgYWN0aXZlIGNsaXAgKEFVRElPIFJFQURZKS4KICAgIC8vIE5vLW9wIHdoZW4gbm90aGluZyBpcyByZWNvcmRpbmcuCiAgICB2b2lkIHN0b3BSZWNvcmRpbmcoKTsKICAgIC8vIEZpbmFsaXplIGEgdGFrZSB0aGF0IGhpdCB0aGUgNjAgcyBsaW1pdCAoc3RhdHVzIExJTUlUIFJFQUNIRUQpLgogICAgLy8gTm8tb3Agd2hlbiBubyBsaW1pdCB3YXMgcmVhY2hlZC4gTWVzc2FnZSB0aHJlYWQgb25seS4KICAgIHZvaWQgZmluYWxpemVSZWNvcmRpbmdGcm9tTGltaXQoKTsKICAgIGJvb2wgaXNSZWNvcmRpbmcoKSBjb25zdCB7IHJldHVybiBjYXB0dXJlRW5naW5lLmlzUmVjb3JkaW5nKCk7IH0KCiAgICAvLyBQcmV2aWV3IChtZXNzYWdlIHRocmVhZCkuIHN0YXJ0UHJldmlldygpIHJldHVybnMgZmFsc2Ugd2hlbgogICAgLy8gdGhlcmUgaXMgbm8gY2xpcCAoc3RhdHVzIGJlY29tZXMgRU1QVFkgU09VUkNFKS4gUGxheSBzdGFydHMKICAgIC8vIGZyb20gdGhlIGN1cnJlbnQgaW50ZXJuYWwgcHJldmlldyBwb3NpdGlvbi4KICAgIGJvb2wgc3RhcnRQcmV2aWV3KCk7CiAgICB2b2lkIHN0b3BQcmV2aWV3KCk7ICAvLyBzdG9wICsgY3Vyc29yIHRvIHRoZSBiZWdpbm5pbmcKICAgIHZvaWQgcGF1c2VQcmV2aWV3KCk7IC8vIHN0b3AgKyBrZWVwIHRoZSBjdXJzb3IKICAgIGJvb2wgaXNQcmV2aWV3UGxheWluZygpIGNvbnN0IHsgcmV0dXJuIHByZXZpZXdFbmdpbmUuaXNQbGF5aW5nKCk7IH0KICAgIC8vIFRydWUgb25jZSBhZnRlciBwbGF5YmFjayByZWFjaGVkIHRoZSBlbmQgb2YgdGhlIGNsaXAuCiAgICBib29sIGNvbnN1bWVQbGF5YmFja0VuZGVkKCkgeyByZXR1cm4gcHJldmlld0VuZ2luZS5jb25zdW1lUGxheWJhY2tFbmRlZCgpOyB9CiAgICBib29sIGNvbnN1bWVJbnN0cnVtZW50UGxheWJhY2tFbmRlZCgpCiAgICB7CiAgICAgICAgcmV0dXJuIGluc3RydW1lbnRQcmV2aWV3RW5naW5lLmNvbnN1bWVQbGF5YmFja0VuZGVkKCk7CiAgICB9CiAgICBkb3VibGUgZ2V0UHJldmlld1Bvc2l0aW9uU2Vjb25kcygpIGNvbnN0IHsgcmV0dXJuIHByZXZpZXdFbmdpbmUuZ2V0UG9zaXRpb25TZWNvbmRzKCk7IH0KICAgIGRvdWJsZSBnZXRQcmV2aWV3RHVyYXRpb25TZWNvbmRzKCkgY29uc3QgeyByZXR1cm4gcHJldmlld0VuZ2luZS5nZXREdXJhdGlvblNlY29uZHMoKTsgfQoKICAgIC8vIFNlZWsgdGhlIHByZXZpZXcgY3Vyc29yIChtZXNzYWdlIHRocmVhZCwgZS5nLiBmcm9tIGRyYWdnaW5nCiAgICAvLyB0aGUgZ3JlZW4gcGxheWhlYWQpLiBDbGFtcHMgdG8gdGhlIGNsaXAgcmFuZ2UuIElmIHByZXZpZXcgaXMKICAgIC8vIHBsYXlpbmcgaXQgY29udGludWVzIGZyb20gdGhlIG5ldyBwb3NpdGlvbjsgaWYgc3RvcHBlZCwgUGxheQogICAgLy8gc3RhcnRzIGZyb20gdGhlcmUuIEFsc28gc2Vla3MgdGhlIGluc3RydW1lbnQgcHJldmlldyB3aGVuIGl0CiAgICAvLyBpcyB0aGUgb25lIHBsYXlpbmcsIHNvIHRoZSBkaXNwbGF5ZWQgcGxheWhlYWQgZm9sbG93cy4KICAgIHZvaWQgc2V0UHJldmlld1Bvc2l0aW9uU2Vjb25kcyAoZG91YmxlIHNlY29uZHMpOwoKICAgIC8vIFdyaXRlIHRoZSBjdXJyZW50IG1lbG9keSB0byBhIHRlbXAgLm1pZCBmb3IgYW4gZXh0ZXJuYWwgZmlsZQogICAgLy8gZHJhZyAoc2FtZSBjaGFubmVsL0JQTSBzZXR0aW5ncyBhcyBleHBvcnRNaWRpVG9GaWxlKS4gUmV0dXJucwogICAgLy8gdGhlIHRlbXAgZmlsZSwgb3IgYW4gZW1wdHkgRmlsZSB3aGVuIHRoZXJlIGlzIG5vIG1lbG9keSB5ZXQKICAgIC8vIChzdGF0dXMgYmVjb21lcyBFcnJvciB3aXRoICJBTkFMWVpFIEZJUlNUIikuCiAgICBqdWNlOjpGaWxlIHByZXBhcmVNaWRpRHJhZ0ZpbGUoKTsKICAgIGRvdWJsZSBnZXREaXNwbGF5UHJldmlld1Bvc2l0aW9uU2Vjb25kcygpIGNvbnN0CiAgICB7CiAgICAgICAgcmV0dXJuIGluc3RydW1lbnRQcmV2aWV3RW5naW5lLmlzUGxheWluZygpCiAgICAgICAgICAgID8gaW5zdHJ1bWVudFByZXZpZXdFbmdpbmUuZ2V0UG9zaXRpb25TZWNvbmRzKCkKICAgICAgICAgICAgOiBwcmV2aWV3RW5naW5lLmdldFBvc2l0aW9uU2Vjb25kcygpOwogICAgfQoKICAgIC8vIEltcG9ydCBhIGZpbGUgKG1lc3NhZ2UgdGhyZWFkKTogc2V0cyBMT0FESU5HIGFuZCBkZWNvZGVzIG9uIGEKICAgIC8vIHdvcmtlciB0aHJlYWQ7IHRoZSByZXN1bHQgaW5zdGFsbHMgdGhlIGNsaXAgb3Igc2V0cyBFUlJPUi4KICAgIHZvaWQgc3RhcnRGaWxlSW1wb3J0IChjb25zdCBqdWNlOjpGaWxlJiBmaWxlKTsKCiAgICAvLyBPZmZsaW5lIG1vbm9waG9uaWMgcGl0Y2ggYW5hbHlzaXMuIFRoZSB3b3JrZXIgY29uc3VtZXMgdGhlCiAgICAvLyBpbW11dGFibGUgYWN0aXZlIGNsaXAgYW5kIG5ldmVyIHRvdWNoZXMgcHJvY2Vzc0Jsb2NrKCkuIFByZXNzaW5nCiAgICAvLyBBbmFseXplIHdoaWxlIHJlY29yZGluZyBmaXJzdCBmaW5hbGl6ZXMgdGhlIHRha2UuIEEgc2Vjb25kIHByZXNzCiAgICAvLyBjYW5jZWxzIHRoZSBjdXJyZW50IGFuYWx5c2lzLgogICAgYm9vbCBzdGFydFBpdGNoQW5hbHlzaXMoKTsKICAgIHZvaWQgY2FuY2VsUGl0Y2hBbmFseXNpcygpOwogICAgYm9vbCBpc1BpdGNoQW5hbHl6aW5nKCkgY29uc3QgeyByZXR1cm4gcGl0Y2hBbmFseXNpc0VuZ2luZS5pc1J1bm5pbmcoKTsgfQogICAgZmxvYXQgZ2V0UGl0Y2hBbmFseXNpc1Byb2dyZXNzKCkgY29uc3QgeyByZXR1cm4gcGl0Y2hBbmFseXNpc0VuZ2luZS5nZXRQcm9ncmVzcygpOyB9CgogICAgLy8gTWVzc2FnZS10aHJlYWQgYWNjZXNzLiBhbmFseXNpc1ZlcnNpb24gaW5jcmVtZW50cyB3aGVuIGEgcmVzdWx0CiAgICAvLyBpcyBjbGVhcmVkIG9yIHB1Ymxpc2hlZCBzbyB0aGUgZWRpdG9yIGNhbiB1cGRhdGUgd2l0aG91dCBwb2xsaW5nCiAgICAvLyB0aGUgZnVsbCB2ZWN0b3IuCiAgICBzdGQ6OnNoYXJlZF9wdHI8Y29uc3QgUGl0Y2hBbmFseXNpc1Jlc3VsdD4gZ2V0UGl0Y2hBbmFseXNpcygpIGNvbnN0CiAgICB7CiAgICAgICAgcmV0dXJuIHBpdGNoQW5hbHlzaXM7CiAgICB9CiAgICBpbnQgZ2V0UGl0Y2hBbmFseXNpc1ZlcnNpb24oKSBjb25zdAogICAgewogICAgICAgIHJldHVybiBwaXRjaEFuYWx5c2lzVmVyc2lvbi5sb2FkIChzdGQ6Om1lbW9yeV9vcmRlcl9hY3F1aXJlKTsKICAgIH0KCiAgICAvLyBEaXNjcmV0ZSBub3RlIGV2ZW50cyBhcmUgY3JlYXRlZCBhdXRvbWF0aWNhbGx5IHdoZW4gcGl0Y2ggYW5hbHlzaXMKICAgIC8vIGNvbXBsZXRlcy4gVGhleSBmZWVkIGJvdGggTUlESSBleHBvcnQgYW5kIHRoZSBzYW1wbGUgcmVuZGVyZXIuCiAgICBzdGQ6OnNoYXJlZF9wdHI8Y29uc3QgTWVsb2R5Tm90ZVNlcXVlbmNlPiBnZXRNZWxvZHlOb3RlcygpIGNvbnN0CiAgICB7CiAgICAgICAgcmV0dXJuIG1lbG9keU5vdGVzOwogICAgfQogICAgaW50IGdldE1lbG9keU5vdGVzVmVyc2lvbigpIGNvbnN0CiAgICB7CiAgICAgICAgcmV0dXJuIG1lbG9keU5vdGVzVmVyc2lvbi5sb2FkIChzdGQ6Om1lbW9yeV9vcmRlcl9hY3F1aXJlKTsKICAgIH0KICAgIGJvb2wgaGFzTWVsb2R5Tm90ZXMoKSBjb25zdAogICAgewogICAgICAgIHJldHVybiBtZWxvZHlOb3RlcyAhPSBudWxscHRyICYmICEgbWVsb2R5Tm90ZXMtPmVtcHR5KCk7CiAgICB9CgogICAgLy8gTG9hZCBhIGxvY2FsIG9uZS1zaG90IGluc3RydW1lbnQgc2FtcGxlLiBEZWNvZGluZywgcm9vdC1ub3RlCiAgICAvLyBkZXRlY3Rpb24gYW5kIHJlbmRlcmluZyBhcmUgYXN5bmNocm9ub3VzLiBUaGUgbG9hZGVkIHNvdW5kIGlzIGtlcHQKICAgIC8vIHdoZW4gdGhlIG1lbG9keSBpcyByZS1hbmFseXNlZCBhbmQgaXMgcmVuZGVyZWQgYWdhaW4gZm9yIG5ldyBub3Rlcy4KICAgIHZvaWQgc3RhcnRJbnN0cnVtZW50RmlsZUltcG9ydCAoY29uc3QganVjZTo6RmlsZSYgZmlsZSk7CiAgICBib29sIGhhc0luc3RydW1lbnRTYW1wbGUoKSBjb25zdAogICAgewogICAgICAgIHJldHVybiBpbnN0cnVtZW50U2FtcGxlICE9IG51bGxwdHIgJiYgISBpbnN0cnVtZW50U2FtcGxlLT5pc0VtcHR5KCk7CiAgICB9CiAgICBib29sIGhhc1JlbmRlcmVkSW5zdHJ1bWVudCgpIGNvbnN0CiAgICB7CiAgICAgICAgcmV0dXJuIHJlbmRlcmVkSW5zdHJ1bWVudENsaXAgIT0gbnVsbHB0ciAmJiAhIHJlbmRlcmVkSW5zdHJ1bWVudENsaXAtPmlzRW1wdHkoKTsKICAgIH0KICAgIGp1Y2U6OlN0cmluZyBnZXRJbnN0cnVtZW50RGlzcGxheVRleHQoKSBjb25zdCB7IHJldHVybiBpbnN0cnVtZW50RGlzcGxheVRleHQ7IH0KICAgIGludCBnZXRJbnN0cnVtZW50VmVyc2lvbigpIGNvbnN0CiAgICB7CiAgICAgICAgcmV0dXJuIGluc3RydW1lbnRWZXJzaW9uLmxvYWQgKHN0ZDo6bWVtb3J5X29yZGVyX2FjcXVpcmUpOwogICAgfQogICAgYm9vbCBpc0luc3RydW1lbnRSZW5kZXJpbmcoKSBjb25zdCB7IHJldHVybiBzYW1wbGVSZW5kZXJFbmdpbmUuaXNSdW5uaW5nKCk7IH0KICAgIGZsb2F0IGdldEluc3RydW1lbnRSZW5kZXJQcm9ncmVzcygpIGNvbnN0IHsgcmV0dXJuIHNhbXBsZVJlbmRlckVuZ2luZS5nZXRQcm9ncmVzcygpOyB9CgogICAgYm9vbCBzdGFydEluc3RydW1lbnRQcmV2aWV3KCk7CiAgICB2b2lkIHN0b3BJbnN0cnVtZW50UHJldmlldygpOwogICAgdm9pZCBwYXVzZUluc3RydW1lbnRQcmV2aWV3KCk7CiAgICBib29sIGlzSW5zdHJ1bWVudFByZXZpZXdQbGF5aW5nKCkgY29uc3QKICAgIHsKICAgICAgICByZXR1cm4gaW5zdHJ1bWVudFByZXZpZXdFbmdpbmUuaXNQbGF5aW5nKCk7CiAgICB9CgogICAgLy8gV3JpdGUgdGhlIHNlZ21lbnRlZCBub3RlcyBhcyBhIHN0YW5kYXJkIC5taWQgZmlsZS4gVGltaW5nIGZvbGxvd3MKICAgIC8vIHRoZSBjdXJyZW50IGhvc3QgQlBNIHdoZW4gYXZhaWxhYmxlLCBvdGhlcndpc2UgMTIwIEJQTS4KICAgIGJvb2wgZXhwb3J0TWlkaVRvRmlsZSAoY29uc3QganVjZTo6RmlsZSYgdGFyZ2V0KTsKCiAgICAvLyBLZWVwIHRoZSBQTEFZIE9SSUdJTkFMIHRvZ2dsZSBwYXJhbWV0ZXIgaW4gc3luYyB3aXRoIHByZXZpZXcKICAgIC8vIHN0YXRlLiBNZXNzYWdlIHRocmVhZCBvbmx5LgogICAgdm9pZCBzZXRQbGF5T3JpZ2luYWxQYXJhbWV0ZXIgKGJvb2wgc2hvdWxkUGxheSk7CiAgICB2b2lkIHNldFBsYXlJbnN0cnVtZW50UGFyYW1ldGVyIChib29sIHNob3VsZFBsYXkpOwoKICAgIC8vIEludGVyZmFjZSBwYXJhbWV0ZXJzIChlZGl0b3Igc3RhdGU7IHBlcnNpc3RlZCBpbiB0aGUgaG9zdCkuCiAgICBqdWNlOjpBdWRpb1Byb2Nlc3NvclZhbHVlVHJlZVN0YXRlIGFwdnRzOwoKcHJpdmF0ZToKICAgIGp1Y2U6OkF1ZGlvUHJvY2Vzc29yVmFsdWVUcmVlU3RhdGU6OlBhcmFtZXRlckxheW91dCBjcmVhdGVQYXJhbWV0ZXJMYXlvdXQoKTsKCiAgICAvLyBJbnN0YWxsIGEgZmluaXNoZWQgY2xpcCBhcyB0aGUgYWN0aXZlIG9uZSAobWVzc2FnZSB0aHJlYWQpLgogICAgdm9pZCBpbnN0YWxsQ2xpcCAoc3RkOjpzaGFyZWRfcHRyPGNvbnN0IEF1ZGlvQ2xpcD4gY2xpcCwgU3RhdHVzIHN0YXR1c0FmdGVyKTsKCiAgICAvLyBDYW5jZWwgaW4tZmxpZ2h0IHdvcmsgYW5kIHJlbW92ZSB0aGUgY3VydmUgYXNzb2NpYXRlZCB3aXRoIHRoZQogICAgLy8gcHJldmlvdXMgY2xpcC4gTWVzc2FnZSB0aHJlYWQgb25seS4KICAgIHZvaWQgY2xlYXJQaXRjaEFuYWx5c2lzKCk7CgogICAgLy8gU3RhcnQvcmVzdGFydCB0aGUgb2ZmbGluZSBzYW1wbGUgcmVuZGVyIG9uY2UgYm90aCBhIHNvdW5kIGFuZCBub3RlCiAgICAvLyBzZXF1ZW5jZSBhcmUgYXZhaWxhYmxlLiBNZXNzYWdlIHRocmVhZCBvbmx5LgogICAgdm9pZCBzdGFydEluc3RydW1lbnRSZW5kZXIoKTsKICAgIHZvaWQgY2xlYXJSZW5kZXJlZEluc3RydW1lbnQoKTsKCiAgICAvLyBTdG9wIGNhcHR1cmUsIHdhaXQgZm9yIHRoZSBsYXN0IGF1ZGlvLXRocmVhZCBjb3B5IGFuZCBwdWJsaXNoIGEKICAgIC8vIG5vbi1lbXB0eSB0YWtlLiBSZXR1cm5zIGZhbHNlIGZvciBubyBhY3RpdmUgdGFrZSBvciB6ZXJvIHNhbXBsZXMuCiAgICBib29sIGZpbmFsaXplQ2FwdHVyZSAoU3RhdHVzIHN0YXR1c0FmdGVyKTsKCiAgICAvLyBBdWRpby10aHJlYWQgaGVscGVycyAocHJvY2Vzc0Jsb2NrIG9ubHkpLgogICAgdm9pZCB1cGRhdGVJbnB1dE1ldGVyIChjb25zdCBqdWNlOjpBdWRpb0J1ZmZlcjxmbG9hdD4mIGJ1ZmZlcik7CiAgICB2b2lkIHVwZGF0ZVNpbGVuY2VTdGF0dXMgKGludCBudW1TYW1wbGVzKTsKCiAgICBBdWRpb0NhcHR1cmVFbmdpbmUgY2FwdHVyZUVuZ2luZTsKICAgIEF1ZGlvUHJldmlld0VuZ2luZSBwcmV2aWV3RW5naW5lOwogICAgQXVkaW9GaWxlTG9hZGVyIGZpbGVMb2FkZXI7CiAgICBBdWRpb0ZpbGVMb2FkZXIgaW5zdHJ1bWVudEZpbGVMb2FkZXI7CiAgICBQaXRjaEFuYWx5c2lzRW5naW5lIHBpdGNoQW5hbHlzaXNFbmdpbmU7CiAgICBTYW1wbGVSZW5kZXJFbmdpbmUgc2FtcGxlUmVuZGVyRW5naW5lOwogICAgQXVkaW9QcmV2aWV3RW5naW5lIGluc3RydW1lbnRQcmV2aWV3RW5naW5lOwoKICAgIHN0ZDo6c2hhcmVkX3B0cjxjb25zdCBBdWRpb0NsaXA+IGFjdGl2ZUNsaXA7IC8vIG1lc3NhZ2UtdGhyZWFkIG93bmVyCiAgICBzdGQ6OnNoYXJlZF9wdHI8Y29uc3QgUGl0Y2hBbmFseXNpc1Jlc3VsdD4gcGl0Y2hBbmFseXNpczsgLy8gbWVzc2FnZS10aHJlYWQgb3duZXIKICAgIHN0ZDo6c2hhcmVkX3B0cjxjb25zdCBNZWxvZHlOb3RlU2VxdWVuY2U+IG1lbG9keU5vdGVzOyAvLyBtZXNzYWdlLXRocmVhZCBvd25lcgogICAgc3RkOjpzaGFyZWRfcHRyPGNvbnN0IEF1ZGlvQ2xpcD4gaW5zdHJ1bWVudFNhbXBsZTsgLy8gbG9hZGVkIG9uZS1zaG90CiAgICBzdGQ6OnNoYXJlZF9wdHI8Y29uc3QgQXVkaW9DbGlwPiByZW5kZXJlZEluc3RydW1lbnRDbGlwOwogICAgc3RkOjphdG9taWM8aW50PiBzdGF0dXMgeyBzdGF0aWNfY2FzdDxpbnQ+IChTdGF0dXM6OlJlYWR5KSB9OwogICAgc3RkOjphdG9taWM8aW50PiBjbGlwVmVyc2lvbiB7IDAgfTsKICAgIHN0ZDo6YXRvbWljPGludD4gcGl0Y2hBbmFseXNpc1ZlcnNpb24geyAwIH07CiAgICBzdGQ6OmF0b21pYzxpbnQ+IG1lbG9keU5vdGVzVmVyc2lvbiB7IDAgfTsKICAgIHN0ZDo6YXRvbWljPGludD4gaW5zdHJ1bWVudFZlcnNpb24geyAwIH07CiAgICBzdGQ6OmF0b21pYzxmbG9hdD4gaW5wdXRQZWFrRGIgeyAtNjAuMGYgfTsKICAgIHN0ZDo6YXRvbWljPGZsb2F0PiBpbnB1dFJtc0RiIHsgLTYwLjBmIH07CiAgICBzdGQ6OmF0b21pYzxkb3VibGU+IGhvc3RTYW1wbGVSYXRlIHsgNDQxMDAuMCB9OwoKICAgIC8vIFNldCB0byBmYWxzZSBpbiB0aGUgZGVzdHJ1Y3RvciBzbyBsYXRlIGZpbGUtbG9hZCBjYWxsYmFja3MKICAgIC8vIG5ldmVyIHRvdWNoIGEgZGVzdHJveWVkIHByb2Nlc3Nvci4KICAgIHN0ZDo6c2hhcmVkX3B0cjxzdGQ6OmF0b21pYzxib29sPj4gYWxpdmVGbGFnCiAgICAgICAgPSBzdGQ6Om1ha2Vfc2hhcmVkPHN0ZDo6YXRvbWljPGJvb2w+PiAodHJ1ZSk7CgogICAgLy8gTWVzc2FnZSB0aHJlYWQgb25seTogc2hvcnQgZXJyb3IgdGV4dCBmb3IgdGhlIEVycm9yIHN0YXR1cy4KICAgIGp1Y2U6OlN0cmluZyBsYXN0RXJyb3JNZXNzYWdlOwogICAganVjZTo6U3RyaW5nIGluc3RydW1lbnREaXNwbGF5VGV4dCB7ICJOTyBTT1VORCBMT0FERUQiIH07CiAgICBqdWNlOjpTdHJpbmcgaW5zdHJ1bWVudEJhc2VOYW1lOwoKICAgIC8vIEF1ZGlvLXRocmVhZC1vbmx5IG1ldGVyIHN0YXRlICh3cml0dGVuIGluIHByb2Nlc3NCbG9jayBvbmx5LAogICAgLy8gcmVzZXQgaW4gcHJlcGFyZVRvUGxheSB3aGlsZSB0aGUgY2FsbGJhY2sgaXMgc3VzcGVuZGVkKS4KICAgIGZsb2F0IG1ldGVyUGVha0xpbmVhciA9IDAuMGY7CiAgICBmbG9hdCBtZXRlclJtc0xpbmVhciA9IDAuMGY7CiAgICBpbnQgc2lsZW50U2FtcGxlcyA9IDA7CgogICAgSlVDRV9ERUNMQVJFX05PTl9DT1BZQUJMRV9XSVRIX0xFQUtfREVURUNUT1IgKE1lbG90aGVvbkF1ZGlvUHJvY2Vzc29yKQp9Owo=
+#pragma once
+
+// MelotheonAudioProcessor - the VST3 audio processor (Phase 3B/3C).
+//
+// The Phase 2 AUDIO FOUNDATION provides:
+//   * Live capture: host audio from the FL Studio Mixer Track is
+//     recorded into a preallocated 60 s buffer (AudioCaptureEngine).
+//   * Import: WAV / AIFF / FLAC (+ MP3 when JUCE enables it) files
+//     are decoded on a worker thread (AudioFileLoader).
+//   * Preview: the active AudioClip plays back through the Mixer
+//     Track, resampled to the host rate (AudioPreviewEngine).
+//   * Input meter: real RMS / peak levels from the incoming signal.
+//   * Status: READY / LOADING / RECORDING / AUDIO READY / PLAYING /
+//     STOPPED / NO INPUT / ERROR / LIMIT REACHED / EMPTY SOURCE.
+//
+// Phase 3 adds offline monophonic pitch detection, stable note
+// segmentation, standard MIDI-file export and sample-instrument preview.
+// Instrument rendering also runs on a worker thread. Voice multiplication,
+// choir generation, AI and third-party instrument hosting remain later work.
+//
+// Thread safety: processBlock() never allocates, never locks, never
+// touches files or the UI, and never changes shared_ptr ownership. The
+// immutable active clip is owned on the message thread. AudioPreviewEngine
+// hands a stable raw pointer to the audio callback and defers ownership
+// changes until any in-flight render finishes. Recording, playback and
+// file loading use atomics or explicit message-thread handoffs.
+//
+// The AudioProcessorValueTreeState holds the interface parameters so
+// the editor state persists in the host project. The audio recording
+// itself is NOT serialized into plugin state: a project reload
+// without its temporary clip returns safely to READY / EMPTY SOURCE.
+
+#include <JuceHeader.h>
+
+#include <atomic>
+#include <memory>
+
+#include "Audio/AudioCaptureEngine.h"
+#include "Audio/AudioFileLoader.h"
+#include "Audio/AudioPreviewEngine.h"
+#include "Audio/SampleRenderEngine.h"
+#include "Analysis/MelodyNotes.h"
+#include "Analysis/PitchAnalysisEngine.h"
+
+class MelotheonAudioProcessor : public juce::AudioProcessor
+{
+public:
+    enum class Status
+    {
+        Ready = 0,
+        Loading,
+        Recording,
+        AudioReady,
+        Playing,
+        Stopped,
+        NoInput,
+        Error,
+        LimitReached,
+        EmptySource,
+        Analyzing,
+        AnalysisReady,
+        NoPitch,
+        LoadingSound,
+        SoundReady,
+        RenderingInstrument,
+        InstrumentReady,
+        PlayingInstrument,
+        MidiExported
+    };
+
+    enum class InputSource
+    {
+        Live = 0,      // capture host audio with Record
+        Imported = 1   // play the loaded file / recorded clip
+    };
+
+    MelotheonAudioProcessor();
+    ~MelotheonAudioProcessor() override;
+
+    // Un-hide the base-class double-precision processBlock overload
+    // (this class overrides the float version only; without this GCC
+    // warns -Woverloaded-virtual).
+    using juce::AudioProcessor::processBlock;
+
+    // AudioProcessor boilerplate (JUCE 8).
+    void prepareToPlay (double sampleRate, int samplesPerBlock) override;
+    void releaseResources() override;
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
+    juce::AudioProcessorEditor* createEditor() override;
+    bool hasEditor() const override { return true; }
+
+    const juce::String getName() const override { return "Melotheon"; }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+    void getStateInformation (juce::MemoryBlock& destData) override;
+    void setStateInformation (const void* data, int sizeInBytes) override;
+
+    // ---- Audio + Phase 3 public API (editor + tests) ----
+
+    InputSource getInputSource() const;
+
+    Status getStatus() const
+    {
+        return static_cast<Status> (status.load (std::memory_order_acquire));
+    }
+
+    void setStatus (Status newStatus)
+    {
+        status.store (static_cast<int> (newStatus), std::memory_order_release);
+    }
+
+    // Short LCD text for the current status. Message thread only
+    // (reads lastErrorMessage). For Error this is the error message.
+    juce::String getStatusText() const;
+
+    // Message thread only. The audio callback does not access this owner.
+    std::shared_ptr<const AudioClip> getActiveClip() const { return activeClip; }
+
+    bool hasActiveClip() const
+    {
+        auto clip = getActiveClip();
+        return clip != nullptr && ! clip->isEmpty();
+    }
+
+    // Increments every time a new clip becomes active. The editor
+    // polls it to know when to refresh the waveform.
+    int getClipVersion() const { return clipVersion.load (std::memory_order_acquire); }
+
+    // Smoothed input levels in dB, range -60..0. The editor reads
+    // them ~30x/second for the meter.
+    float getInputPeakDb() const { return inputPeakDb.load (std::memory_order_acquire); }
+    float getInputRmsDb() const { return inputRmsDb.load (std::memory_order_acquire); }
+
+    // Recording (message thread). startRecording() returns false
+    // when the input source is not LIVE INPUT (status becomes Error
+    // with "USE LIVE INPUT") or a take is already running.
+    bool startRecording();
+    // Stop and finalize the take into the active clip (AUDIO READY).
+    // No-op when nothing is recording.
+    void stopRecording();
+    // Finalize a take that hit the 60 s limit (status LIMIT REACHED).
+    // No-op when no limit was reached. Message thread only.
+    void finalizeRecordingFromLimit();
+    bool isRecording() const { return captureEngine.isRecording(); }
+
+    // Preview (message thread). startPreview() returns false when
+    // there is no clip (status becomes EMPTY SOURCE). Play starts
+    // from the current internal preview position.
+    bool startPreview();
+    void stopPreview();  // stop + cursor to the beginning
+    void pausePreview(); // stop + keep the cursor
+    bool isPreviewPlaying() const { return previewEngine.isPlaying(); }
+    // True once after playback reached the end of the clip.
+    bool consumePlaybackEnded() { return previewEngine.consumePlaybackEnded(); }
+    bool consumeInstrumentPlaybackEnded()
+    {
+        return instrumentPreviewEngine.consumePlaybackEnded();
+    }
+    double getPreviewPositionSeconds() const { return previewEngine.getPositionSeconds(); }
+    double getPreviewDurationSeconds() const { return previewEngine.getDurationSeconds(); }
+
+    // Seek the preview cursor (message thread, e.g. from dragging
+    // the green playhead). Clamps to the clip range. If preview is
+    // playing it continues from the new position; if stopped, Play
+    // starts from there. Also seeks the instrument preview when it
+    // is the one playing, so the displayed playhead follows.
+    void setPreviewPositionSeconds (double seconds);
+
+    // Write the current melody to a temp .mid for an external file
+    // drag (same channel/BPM settings as exportMidiToFile). Returns
+    // the temp file, or an empty File when there is no melody yet
+    // (status becomes Error with "ANALYZE FIRST").
+    juce::File prepareMidiDragFile();
+    double getDisplayPreviewPositionSeconds() const
+    {
+        return instrumentPreviewEngine.isPlaying()
+            ? instrumentPreviewEngine.getPositionSeconds()
+            : previewEngine.getPositionSeconds();
+    }
+
+    // Import a file (message thread): sets LOADING and decodes on a
+    // worker thread; the result installs the clip or sets ERROR.
+    void startFileImport (const juce::File& file);
+
+    // Offline monophonic pitch analysis. The worker consumes the
+    // immutable active clip and never touches processBlock(). Pressing
+    // Analyze while recording first finalizes the take. A second press
+    // cancels the current analysis.
+    bool startPitchAnalysis();
+    void cancelPitchAnalysis();
+    bool isPitchAnalyzing() const { return pitchAnalysisEngine.isRunning(); }
+    float getPitchAnalysisProgress() const { return pitchAnalysisEngine.getProgress(); }
+
+    // Message-thread access. analysisVersion increments when a result
+    // is cleared or published so the editor can update without polling
+    // the full vector.
+    std::shared_ptr<const PitchAnalysisResult> getPitchAnalysis() const
+    {
+        return pitchAnalysis;
+    }
+    int getPitchAnalysisVersion() const
+    {
+        return pitchAnalysisVersion.load (std::memory_order_acquire);
+    }
+
+    // Discrete note events are created automatically when pitch analysis
+    // completes. They feed both MIDI export and the sample renderer.
+    std::shared_ptr<const MelodyNoteSequence> getMelodyNotes() const
+    {
+        return melodyNotes;
+    }
+    int getMelodyNotesVersion() const
+    {
+        return melodyNotesVersion.load (std::memory_order_acquire);
+    }
+    bool hasMelodyNotes() const
+    {
+        return melodyNotes != nullptr && ! melodyNotes->empty();
+    }
+
+    // Load a local one-shot instrument sample. Decoding, root-note
+    // detection and rendering are asynchronous. The loaded sound is kept
+    // when the melody is re-analysed and is rendered again for new notes.
+    void startInstrumentFileImport (const juce::File& file);
+    bool hasInstrumentSample() const
+    {
+        return instrumentSample != nullptr && ! instrumentSample->isEmpty();
+    }
+    bool hasRenderedInstrument() const
+    {
+        return renderedInstrumentClip != nullptr && ! renderedInstrumentClip->isEmpty();
+    }
+    juce::String getInstrumentDisplayText() const { return instrumentDisplayText; }
+    int getInstrumentVersion() const
+    {
+        return instrumentVersion.load (std::memory_order_acquire);
+    }
+    bool isInstrumentRendering() const { return sampleRenderEngine.isRunning(); }
+    float getInstrumentRenderProgress() const { return sampleRenderEngine.getProgress(); }
+
+    bool startInstrumentPreview();
+    void stopInstrumentPreview();
+    void pauseInstrumentPreview();
+    bool isInstrumentPreviewPlaying() const
+    {
+        return instrumentPreviewEngine.isPlaying();
+    }
+
+    // Write the segmented notes as a standard .mid file. Timing follows
+    // the current host BPM when available, otherwise 120 BPM.
+    bool exportMidiToFile (const juce::File& target);
+
+    // Keep the PLAY ORIGINAL toggle parameter in sync with preview
+    // state. Message thread only.
+    void setPlayOriginalParameter (bool shouldPlay);
+    void setPlayInstrumentParameter (bool shouldPlay);
+
+    // Interface parameters (editor state; persisted in the host).
+    juce::AudioProcessorValueTreeState apvts;
+
+private:
+    juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    // Install a finished clip as the active one (message thread).
+    void installClip (std::shared_ptr<const AudioClip> clip, Status statusAfter);
+
+    // Cancel in-flight work and remove the curve associated with the
+    // previous clip. Message thread only.
+    void clearPitchAnalysis();
+
+    // Start/restart the offline sample render once both a sound and note
+    // sequence are available. Message thread only.
+    void startInstrumentRender();
+    void clearRenderedInstrument();
+
+    // Stop capture, wait for the last audio-thread copy and publish a
+    // non-empty take. Returns false for no active take or zero samples.
+    bool finalizeCapture (Status statusAfter);
+
+    // Audio-thread helpers (processBlock only).
+    void updateInputMeter (const juce::AudioBuffer<float>& buffer);
+    void updateSilenceStatus (int numSamples);
+
+    AudioCaptureEngine captureEngine;
+    AudioPreviewEngine previewEngine;
+    AudioFileLoader fileLoader;
+    AudioFileLoader instrumentFileLoader;
+    PitchAnalysisEngine pitchAnalysisEngine;
+    SampleRenderEngine sampleRenderEngine;
+    AudioPreviewEngine instrumentPreviewEngine;
+
+    std::shared_ptr<const AudioClip> activeClip; // message-thread owner
+    std::shared_ptr<const PitchAnalysisResult> pitchAnalysis; // message-thread owner
+    std::shared_ptr<const MelodyNoteSequence> melodyNotes; // message-thread owner
+    std::shared_ptr<const AudioClip> instrumentSample; // loaded one-shot
+    std::shared_ptr<const AudioClip> renderedInstrumentClip;
+    std::atomic<int> status { static_cast<int> (Status::Ready) };
+    std::atomic<int> clipVersion { 0 };
+    std::atomic<int> pitchAnalysisVersion { 0 };
+    std::atomic<int> melodyNotesVersion { 0 };
+    std::atomic<int> instrumentVersion { 0 };
+    std::atomic<float> inputPeakDb { -60.0f };
+    std::atomic<float> inputRmsDb { -60.0f };
+    std::atomic<double> hostSampleRate { 44100.0 };
+
+    // Set to false in the destructor so late file-load callbacks
+    // never touch a destroyed processor.
+    std::shared_ptr<std::atomic<bool>> aliveFlag
+        = std::make_shared<std::atomic<bool>> (true);
+
+    // Message thread only: short error text for the Error status.
+    juce::String lastErrorMessage;
+    juce::String instrumentDisplayText { "NO SOUND LOADED" };
+    juce::String instrumentBaseName;
+
+    // Audio-thread-only meter state (written in processBlock only,
+    // reset in prepareToPlay while the callback is suspended).
+    float meterPeakLinear = 0.0f;
+    float meterRmsLinear = 0.0f;
+    int silentSamples = 0;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MelotheonAudioProcessor)
+};
