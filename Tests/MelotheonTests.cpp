@@ -16,6 +16,7 @@
 #include "Audio/SampleInstrumentRenderer.h"
 #include "Analysis/MonophonicPitchAnalyzer.h"
 #include "Analysis/NoteSegmenter.h"
+#include "Analysis/PitchAnalysis.h"
 #include "Midi/MidiExporter.h"
 #include "PluginProcessor.h"
 
@@ -873,6 +874,232 @@ void testProcessorSeek()
     processor.releaseResources();
 }
 
+void testCurveEditAdjustsFramesAndResegments()
+{
+    // Synthetic 2 s analysis: voiced frames at MIDI 60 with a small
+    // vibrato, 10 ms hop, plus an unvoiced gap at 0.80-1.00 s.
+    PitchAnalysisResult analysis;
+    analysis.durationSeconds = 2.0;
+    analysis.hopSeconds = 0.01;
+    analysis.analysisSampleRate = 24000.0;
+    for (int i = 0; i < 200; ++i)
+    {
+        PitchFrame frame;
+        frame.timeSeconds = i * 0.01;
+        frame.voiced = (i < 80 || i >= 100);
+        frame.midiPitch = 60.0f + 0.2f * std::sin (i * 0.3f);
+        frame.frequencyHz = 261.63f;
+        frame.confidence = 0.9f;
+        frame.rmsDb = -20.0f;
+        analysis.frames.push_back (frame);
+    }
+    analysis.voicedFrameCount = 180;
+    analysis.minMidi = 59.8f;
+    analysis.maxMidi = 60.2f;
+
+    // Edit at 1.50 s toward MIDI 64 with a 0.15 s window.
+    NoteSegmenter::applyCurveEdit (analysis, 1.50, 64.0f, 0.15);
+    // The centre frame moved to the target...
+    CHECK_NEAR (analysis.frames[150].midiPitch, 64.0f, 0.01f);
+    // ...frames far away are untouched...
+    CHECK_NEAR (analysis.frames[50].midiPitch,
+                60.0f + 0.2f * std::sin (50 * 0.3f), 0.01f);
+    CHECK_NEAR (analysis.frames[10].midiPitch,
+                60.0f + 0.2f * std::sin (10 * 0.3f), 0.01f);
+    // ...the falloff is smooth: the frame 0.10 s before the centre
+    // moved only part of the way...
+    const float before = analysis.frames[140].midiPitch;
+    CHECK (before > 60.5f && before < 63.5f);
+    // ...and the unvoiced gap stayed unvoiced and untouched.
+    CHECK (! analysis.frames[90].voiced);
+    CHECK_NEAR (analysis.frames[90].midiPitch,
+                60.0f + 0.2f * std::sin (90 * 0.3f), 0.01f);
+    // Frequency follows the new pitch, and the range metadata too.
+    CHECK_NEAR (analysis.frames[150].frequencyHz, 329.63f, 1.0f);
+    CHECK_NEAR (analysis.maxMidi, 64.0f, 0.01f);
+
+    // Re-segmentation follows the corrected curve: the note covering
+    // 1.50 s is now at 64.
+    auto notes = NoteSegmenter::segment (analysis);
+    CHECK (! notes->empty());
+    bool found64 = false;
+    for (const auto& note : notes->notes)
+        if (note.startSeconds <= 1.50 && note.endSeconds >= 1.50)
+            found64 = (note.midiNote == 64);
+    CHECK (found64);
+}
+
+void testAuditionSineFallback()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+
+    // No sound loaded: a key still plays (sine fallback).
+    processor.startAudition (69); // A4 = 440 Hz
+    CHECK (processor.isAuditioning());
+    CHECK (processor.getAuditionNote() == 69);
+
+    juce::AudioBuffer<float> output (2, 512);
+    juce::MidiBuffer midi;
+    int zeroCrossings = 0;
+    float previous = 0.0f;
+    for (int b = 0; b < 9; ++b) // ~0.1 s at 44.1 kHz
+    {
+        output.clear();
+        processor.processBlock (output, midi);
+        const float* data = output.getReadPointer (0);
+        for (int i = 0; i < 512; ++i)
+        {
+            if ((previous < 0.0f && data[i] >= 0.0f)
+                || (previous > 0.0f && data[i] <= 0.0f))
+                ++zeroCrossings;
+            previous = data[i];
+        }
+    }
+    // 440 Hz over ~0.1 s crosses zero ~88 times (the attack ramp
+    // lowers the count slightly, so accept a wide band).
+    CHECK (zeroCrossings > 60 && zeroCrossings < 110);
+
+    // Note-off: the release tail dies out and the output is silent.
+    processor.stopAudition();
+    CHECK (! processor.isAuditioning());
+    for (int b = 0; b < 10; ++b)
+    {
+        output.clear();
+        processor.processBlock (output, midi);
+    }
+    CHECK_NEAR (output.getMagnitude (0, 0, 512), 0.0f, 1e-6f);
+
+    processor.releaseResources();
+}
+
+void testAuditionSamplePlayback()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+
+    // A 440 Hz one-shot (root A4) installed as the audition source.
+    auto oneShotBuffer = makeSine (44100.0, 0.5, 440.0f, 0.5f);
+    auto oneShot = AudioClip::fromBuffer (oneShotBuffer, 44100.0, "A4 one-shot", true);
+    CHECK (oneShot != nullptr);
+    if (oneShot == nullptr)
+        return;
+    CHECK (SampleInstrumentRenderer::detectRootMidi (*oneShot) == 69);
+    processor.installAuditionSample (oneShot, 69);
+
+    // Audition one octave up: the one-shot plays at 2x speed (880 Hz).
+    processor.startAudition (81);
+    juce::AudioBuffer<float> output (2, 512);
+    juce::MidiBuffer midi;
+    int zeroCrossings = 0;
+    float previous = 0.0f;
+    for (int b = 0; b < 9; ++b) // ~0.1 s
+    {
+        output.clear();
+        processor.processBlock (output, midi);
+        const float* data = output.getReadPointer (0);
+        for (int i = 0; i < 512; ++i)
+        {
+            if ((previous < 0.0f && data[i] >= 0.0f)
+                || (previous > 0.0f && data[i] <= 0.0f))
+                ++zeroCrossings;
+            previous = data[i];
+        }
+    }
+    // 880 Hz over ~0.1 s: ~184 crossings.
+    CHECK (zeroCrossings > 140 && zeroCrossings < 220);
+
+    // Installing a new source while a key is held stops the old voice
+    // without crashing; the new sound (220 Hz root) then plays at the
+    // requested pitch (A4 = 440 Hz from root A3).
+    auto otherBuffer = makeSine (44100.0, 0.5, 220.0f, 0.5f);
+    auto otherShot = AudioClip::fromBuffer (otherBuffer, 44100.0, "A3 one-shot", true);
+    processor.installAuditionSample (otherShot, 57);
+    processor.startAudition (69);
+    zeroCrossings = 0;
+    previous = 0.0f;
+    for (int b = 0; b < 9; ++b)
+    {
+        output.clear();
+        processor.processBlock (output, midi);
+        const float* data = output.getReadPointer (0);
+        for (int i = 0; i < 512; ++i)
+        {
+            if ((previous < 0.0f && data[i] >= 0.0f)
+                || (previous > 0.0f && data[i] <= 0.0f))
+                ++zeroCrossings;
+            previous = data[i];
+        }
+    }
+    CHECK (zeroCrossings > 60 && zeroCrossings < 110);
+
+    processor.stopAudition();
+    processor.releaseResources();
+}
+
+void testCurveEditCommitAndDragFile()
+{
+    // Synthetic analysis: 1.5 s of MIDI 60, 10 ms hop.
+    PitchAnalysisResult analysis;
+    analysis.durationSeconds = 1.5;
+    analysis.hopSeconds = 0.01;
+    analysis.analysisSampleRate = 24000.0;
+    for (int i = 0; i < 150; ++i)
+    {
+        PitchFrame frame;
+        frame.timeSeconds = i * 0.01;
+        frame.voiced = true;
+        frame.midiPitch = 60.0f;
+        frame.frequencyHz = 261.63f;
+        frame.confidence = 0.9f;
+        frame.rmsDb = -20.0f;
+        analysis.frames.push_back (frame);
+    }
+    analysis.voicedFrameCount = 150;
+    analysis.minMidi = 60.0f;
+    analysis.maxMidi = 60.0f;
+
+    // The user drags the curve at 0.75 s up to 64.
+    NoteSegmenter::applyCurveEdit (analysis, 0.75, 64.0f, 0.15);
+
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    CHECK (processor.commitPitchCurveEdit (analysis));
+    CHECK (processor.isPitchAnalysisEdited());
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::AnalysisReady);
+    CHECK (processor.getStatusHint() == "CURVE EDITED - RE-ANALYZE TO RESET");
+    CHECK (processor.getStatusHintVersion() > 0);
+    CHECK (processor.hasMelodyNotes());
+    bool found64 = false;
+    for (const auto& note : processor.getMelodyNotes()->notes)
+        if (note.startSeconds <= 0.75 && note.endSeconds >= 0.75)
+            found64 = (note.midiNote == 64);
+    CHECK (found64);
+
+    // The committed melody is now draggable: the temp file exists for
+    // the drag (valid .mid) and is deleted after it.
+    const juce::File dragFile = processor.prepareMidiDragFile();
+    CHECK (dragFile != juce::File{});
+    CHECK (dragFile.existsAsFile());
+    CHECK (dragFile.getSize() > 20);
+    {
+        juce::FileInputStream input (dragFile);
+        CHECK (input.openedOk());
+        juce::MidiFile parsed;
+        CHECK (parsed.readFrom (input));
+    }
+    CHECK (dragFile.deleteFile());
+    CHECK (! dragFile.existsAsFile());
+
+    // A second prepare re-creates the same temp path cleanly.
+    const juce::File dragFile2 = processor.prepareMidiDragFile();
+    CHECK (dragFile2 == dragFile);
+    CHECK (dragFile2.existsAsFile());
+    dragFile2.deleteFile();
+
+    processor.releaseResources();
+}
+
 void testProcessorEmptyTake()
 {
     MelotheonAudioProcessor processor;
@@ -956,6 +1183,10 @@ int main()
     testProcessorPassThrough();
     testProcessorRecordAndPreview();
     testProcessorSeek();
+    testCurveEditAdjustsFramesAndResegments();
+    testAuditionSineFallback();
+    testAuditionSamplePlayback();
+    testCurveEditCommitAndDragFile();
     testProcessorEmptyTake();
     testProcessorTransportExclusion();
 
