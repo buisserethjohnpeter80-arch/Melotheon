@@ -20,7 +20,10 @@
 // paints its curve/confidence and stable note blocks. The editor also
 // loads a local one-shot sound, previews the detected melody with it,
 // exports a standard MIDI file, and offers vertical piano zoom/scroll.
-// SEND TO CHANNEL remains a later host-integration phase. The MIDI
+// SEND TO CHANNEL streams the current melody as live MIDI to the
+// host while it and MIDI OUT are both on (see renderMidiOut in
+// PluginProcessor.cpp): the user routes the plugin's MIDI output
+// port to a target instrument's input port in FL Studio. The MIDI
 // chip opens a DRAG MIDI TO FL / EXPORT MIDI panel, and the green
 // playhead in the piano roll is draggable to seek preview playback.
 // The drag temp file is owned by the editor and deleted only after
@@ -29,6 +32,10 @@
 // loaded sound (built-in sine when none is loaded) and the orange
 // pitch curve is draggable for manual correction: semitone steps,
 // re-segmented on release, and a later RE-ANALYZE overwrites edits.
+// Each orange note block is draggable too (MOVE tool: pitch and time,
+// beat-snapped; CUT tool: click to split; STRETCH tool: drag an edge
+// to lengthen or shorten). A pitch move also shifts the underlying
+// pitch frames, so curve and notes stay in sync.
 //
 // The editor polls the processor on a ~30 Hz timer (meter, playhead,
 // status, clip version) and never touches the audio thread directly.
@@ -131,10 +138,11 @@ private:
     bool midiDragInFlight = false;
 
     // Live piano-roll interaction state (timerCallback only): the key
-    // currently auditioned and the semitone under a curve drag, both
-    // shown in the note LCD instead of the analysis frame.
+    // currently auditioned and the semitone under a curve or note
+    // drag, all shown in the note LCD instead of the analysis frame.
     int auditioningMidi = -1;
     int curveEditMidi = -1;
+    int noteEditMidi = -1;
 
     // Transient status hint (see processor setStatusHint): shown in
     // the status LCD for a few seconds, then the normal status text
@@ -190,6 +198,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> noiseGateAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> monoAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> midiOutAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> sendToChannelAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> playOriginalAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> playInstrumentAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> inputSourceAttachment;
