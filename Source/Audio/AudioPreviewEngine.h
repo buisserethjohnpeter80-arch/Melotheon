@@ -1,1 +1,95 @@
-I3ByYWdtYSBvbmNlCgovLyBBdWRpb1ByZXZpZXdFbmdpbmU6IHBsYXlzIHRoZSBhY3RpdmUgQXVkaW9DbGlwIGJhY2sgdGhyb3VnaCB0aGUKLy8gaG9zdCdzIE1peGVyIFRyYWNrIChQaGFzZSAyKS4KLy8KLy8gVGhlIGVuZ2luZSBpcyBkcml2ZW4gZnJvbSBwcm9jZXNzQmxvY2soKTogcmVuZGVyKCkgb3ZlcndyaXRlcyB0aGUKLy8gb3V0cHV0IGJ1ZmZlciB3aXRoIHRoZSBjbGlwIGF1ZGlvLCByZXNhbXBsZWQgdG8gdGhlIGhvc3Qgc2FtcGxlCi8vIHJhdGUgYnkgbGluZWFyIGludGVycG9sYXRpb24sIHNvIGEgZmlsZSByZWNvcmRlZCBhdCBhIGRpZmZlcmVudAovLyByYXRlIHBsYXlzIGF0IHRoZSBjb3JyZWN0IHNwZWVkIGFuZCBwaXRjaC4gTm8gc2Vjb25kIGF1ZGlvIGRldmljZQovLyBpcyBjcmVhdGVkIGFuZCBob3N0IHJvdXRpbmcgaXMgbmV2ZXIgYnlwYXNzZWQuIFdoZW4gcHJldmlldyBpcwovLyBpbmFjdGl2ZSB0aGUgcHJvY2Vzc29yIHBhc3NlcyBob3N0IGlucHV0IHRocm91Z2ggdW5jaGFuZ2VkIGFuZAovLyByZW5kZXIoKSBpcyBuZXZlciBjYWxsZWQuCi8vCi8vIFRocmVhZCBzYWZldHk6IHRoZSBtZXNzYWdlIHRocmVhZCBvd25zIHRoZSBpbW11dGFibGUgQXVkaW9DbGlwLiBUaGUKLy8gYXVkaW8gdGhyZWFkIHJlY2VpdmVzIGEgbm9uLW93bmluZyBhdG9taWMgcG9pbnRlciBhbmQgYW5ub3VuY2VzIGVhY2gKLy8gcmVuZGVyIHRoYXQgaXMgaW4gZmxpZ2h0LiBzZXRDbGlwKCkgZmlyc3QgcmVtb3ZlcyB0aGF0IHBvaW50ZXIsIHRoZW4KLy8gd2FpdHMgb24gdGhlIG1lc3NhZ2UgdGhyZWFkIGJlZm9yZSByZWxlYXNpbmcgdGhlIG9sZCBvd25lci4gVGhpcyBrZWVwcwovLyBzaGFyZWRfcHRyIHJlZmVyZW5jZSBjb3VudGluZyBhbmQgZGVzdHJ1Y3Rpb24gb2ZmIHRoZSBhdWRpbyB0aHJlYWQuCi8vIFBsYXliYWNrIHBvc2l0aW9uIGlzIGFuIGF0b21pYyBkb3VibGUgKGluIGNsaXAgc2FtcGxlcykgdXBkYXRlZCBvbmNlCi8vIHBlciBibG9jay4gTm8gYWxsb2NhdGlvbiwgbm8gbG9ja3MgYW5kIG5vIEkvTyBvY2N1ciBpbiByZW5kZXIoKS4KCiNpbmNsdWRlIDxqdWNlX2F1ZGlvX2Jhc2ljcy9qdWNlX2F1ZGlvX2Jhc2ljcy5oPgojaW5jbHVkZSA8anVjZV9jb3JlL2p1Y2VfY29yZS5oPgoKI2luY2x1ZGUgPGF0b21pYz4KI2luY2x1ZGUgPGNzdGRpbnQ+CiNpbmNsdWRlIDxtZW1vcnk+CgojaW5jbHVkZSAiQXVkaW9DbGlwLmgiCgpjbGFzcyBBdWRpb1ByZXZpZXdFbmdpbmUKewpwdWJsaWM6CiAgICBBdWRpb1ByZXZpZXdFbmdpbmUoKSA9IGRlZmF1bHQ7CiAgICB+QXVkaW9QcmV2aWV3RW5naW5lKCk7CgogICAgLy8gSW5zdGFsbCBhIG5ldyBjbGlwIChtZXNzYWdlIHRocmVhZCkuIFN0b3BzIGFueSBwbGF5YmFjayBpbgogICAgLy8gcHJvZ3Jlc3MgYW5kIHJlc2V0cyB0aGUgcG9zaXRpb24gdG8gdGhlIHN0YXJ0LgogICAgdm9pZCBzZXRDbGlwIChzdGQ6OnNoYXJlZF9wdHI8Y29uc3QgQXVkaW9DbGlwPiBjbGlwKTsKCiAgICAvLyBNZXNzYWdlIHRocmVhZCBvbmx5LiBUaGUgYXVkaW8gY2FsbGJhY2sgbmV2ZXIgY29waWVzIGEgc2hhcmVkX3B0ci4KICAgIHN0ZDo6c2hhcmVkX3B0cjxjb25zdCBBdWRpb0NsaXA+IGdldENsaXAoKSBjb25zdCB7IHJldHVybiBvd25lZENsaXA7IH0KCiAgICBib29sIGhhc0NsaXAoKSBjb25zdAogICAgewogICAgICAgIGF1dG8gYyA9IGdldENsaXAoKTsKICAgICAgICByZXR1cm4gYyAhPSBudWxscHRyICYmICEgYy0+aXNFbXB0eSgpOwogICAgfQoKICAgIC8vIFN0YXJ0IHBsYXliYWNrIGZyb20gdGhlIGN1cnJlbnQgaW50ZXJuYWwgcG9zaXRpb24uIFJldHVybnMKICAgIC8vIGZhbHNlIHdoZW4gdGhlcmUgaXMgbm8gY2xpcCB0byBwbGF5LgogICAgYm9vbCBzdGFydCgpOwoKICAgIC8vIFN0b3AgYW5kIHJldHVybiB0aGUgY3Vyc29yIHRvIHRoZSBiZWdpbm5pbmcuCiAgICB2b2lkIHN0b3AoKTsKCiAgICAvLyBTdG9wIGJ1dCBrZWVwIHRoZSBjdXJzb3Igd2hlcmUgaXQgaXMgKHJlc3VtZSB3aXRoIHN0YXJ0KCkpLgogICAgdm9pZCBwYXVzZSgpOwoKICAgIC8vIFNlZWsgdG8gYSBwb3NpdGlvbiBpbiBzZWNvbmRzIChtZXNzYWdlIHRocmVhZCwgZS5nLiBmcm9tCiAgICAvLyBkcmFnZ2luZyB0aGUgZ3JlZW4gcGxheWhlYWQpLiBDbGFtcHMgdG8gdGhlIGNsaXAgcmFuZ2U7CiAgICAvLyBuby1vcCB3aXRob3V0IGEgY2xpcC4gSWYgcGxheWJhY2sgaXMgcnVubmluZyBpdCBjb250aW51ZXMKICAgIC8vIGZyb20gdGhlIG5ldyBwb3NpdGlvbi4gQXRvbWljIG9ubHk6IHNhZmUgdG8gY2FsbCB3aGlsZQogICAgLy8gcmVuZGVyKCkgaXMgaW4gZmxpZ2h0ICh0aGUgZ2VuZXJhdGlvbiBidW1wIHN0b3BzIGEgc3RhbGUKICAgIC8vIGluLWZsaWdodCBibG9jayBmcm9tIHB1Ymxpc2hpbmcgaXRzIG9sZCBlbmQgcG9zaXRpb24pLgogICAgdm9pZCBzZXRQb3NpdGlvblNlY29uZHMgKGRvdWJsZSBzZWNvbmRzKTsKCiAgICBib29sIGlzUGxheWluZygpIGNvbnN0IHsgcmV0dXJuIHBsYXlpbmcubG9hZCAoc3RkOjptZW1vcnlfb3JkZXJfYWNxdWlyZSk7IH0KCiAgICBkb3VibGUgZ2V0UG9zaXRpb25TZWNvbmRzKCkgY29uc3Q7CiAgICBkb3VibGUgZ2V0RHVyYXRpb25TZWNvbmRzKCkgY29uc3Q7CgogICAgLy8gVHJ1ZSBvbmNlIGFmdGVyIHBsYXliYWNrIHJlYWNoZWQgdGhlIGVuZCBvZiB0aGUgY2xpcC4gVGhlCiAgICAvLyBtZXNzYWdlIHRocmVhZCBjb25zdW1lcyBpdCB0byB1cGRhdGUgdGhlIHN0YXR1cyBkaXNwbGF5LgogICAgYm9vbCBjb25zdW1lUGxheWJhY2tFbmRlZCgpIHsgcmV0dXJuIGVuZGVkRmxhZy5leGNoYW5nZSAoZmFsc2UsIHN0ZDo6bWVtb3J5X29yZGVyX2FjcV9yZWwpOyB9CgogICAgLy8gUmVuZGVyIG9uZSBibG9jayBvZiBwcmV2aWV3IGF1ZGlvIGludG8gdGhlIG91dHB1dCBidWZmZXIsCiAgICAvLyBvdmVyd3JpdGluZyBpdC4gUmVhbC10aW1lIHNhZmUuIFdoZW4gdGhlIGNsaXAgZW5kcyBtaWQtYmxvY2sKICAgIC8vIHRoZSByZW1haW5kZXIgb2YgdGhlIGJsb2NrIGlzIHNpbGVuY2UgYW5kIHBsYXliYWNrIHN0b3BzLgogICAgdm9pZCByZW5kZXIgKGp1Y2U6OkF1ZGlvQnVmZmVyPGZsb2F0PiYgYnVmZmVyLCBkb3VibGUgaG9zdFNhbXBsZVJhdGUpOwoKcHJpdmF0ZToKICAgIC8vIFdhaXQgb25seSBvbiB0aGUgbWVzc2FnZSB0aHJlYWQgd2hpbGUgcmVwbGFjaW5nL2Rlc3Ryb3lpbmcgYSBjbGlwLgogICAgdm9pZCB3YWl0Rm9yUmVuZGVyZXJUb0ZpbmlzaCgpOwoKICAgIHN0ZDo6c2hhcmVkX3B0cjxjb25zdCBBdWRpb0NsaXA+IG93bmVkQ2xpcDsgLy8gbWVzc2FnZS10aHJlYWQgb3duZXIKICAgIHN0ZDo6YXRvbWljPGNvbnN0IEF1ZGlvQ2xpcCo+IGNsaXBGb3JBdWRpbyB7IG51bGxwdHIgfTsKICAgIHN0ZDo6YXRvbWljPGludD4gcmVuZGVyZXJzSW5GbGlnaHQgeyAwIH07CiAgICBzdGQ6OmF0b21pYzxib29sPiBwbGF5aW5nIHsgZmFsc2UgfTsKICAgIHN0ZDo6YXRvbWljPGRvdWJsZT4gcG9zaXRpb25TYW1wbGVzIHsgMC4wIH07CiAgICBzdGQ6OmF0b21pYzxib29sPiBlbmRlZEZsYWcgeyBmYWxzZSB9OwogICAgLy8gU3RvcCwgcGF1c2UgYW5kIGNsaXAgcmVwbGFjZW1lbnQgaW5jcmVtZW50IHRoaXMgdG9rZW4uIHJlbmRlcigpCiAgICAvLyBwdWJsaXNoZXMgaXRzIGZpbmFsIGN1cnNvciBvbmx5IGlmIGl0cyB0b2tlbiBpcyBzdGlsbCBjdXJyZW50LgogICAgc3RkOjphdG9taWM8c3RkOjp1aW50NjRfdD4gdHJhbnNwb3J0R2VuZXJhdGlvbiB7IDAgfTsKfTsK
+#pragma once
+
+// AudioPreviewEngine: plays the active AudioClip back through the
+// host's Mixer Track (Phase 2).
+//
+// The engine is driven from processBlock(): render() overwrites the
+// output buffer with the clip audio, resampled to the host sample
+// rate by linear interpolation, so a file recorded at a different
+// rate plays at the correct speed and pitch. No second audio device
+// is created and host routing is never bypassed. When preview is
+// inactive the processor passes host input through unchanged and
+// render() is never called.
+//
+// Thread safety: the message thread owns the immutable AudioClip. The
+// audio thread receives a non-owning atomic pointer and announces each
+// render that is in flight. setClip() first removes that pointer, then
+// waits on the message thread before releasing the old owner. This keeps
+// shared_ptr reference counting and destruction off the audio thread.
+// Playback position is an atomic double (in clip samples) updated once
+// per block. No allocation, no locks and no I/O occur in render().
+
+#include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_core/juce_core.h>
+
+#include <atomic>
+#include <cstdint>
+#include <memory>
+
+#include "AudioClip.h"
+
+class AudioPreviewEngine
+{
+public:
+    AudioPreviewEngine() = default;
+    ~AudioPreviewEngine();
+
+    // Install a new clip (message thread). Stops any playback in
+    // progress and resets the position to the start.
+    void setClip (std::shared_ptr<const AudioClip> clip);
+
+    // Message thread only. The audio callback never copies a shared_ptr.
+    std::shared_ptr<const AudioClip> getClip() const { return ownedClip; }
+
+    bool hasClip() const
+    {
+        auto c = getClip();
+        return c != nullptr && ! c->isEmpty();
+    }
+
+    // Start playback from the current internal position. Returns
+    // false when there is no clip to play.
+    bool start();
+
+    // Stop and return the cursor to the beginning.
+    void stop();
+
+    // Stop but keep the cursor where it is (resume with start()).
+    void pause();
+
+    // Seek to a position in seconds (message thread, e.g. from
+    // dragging the green playhead). Clamps to the clip range;
+    // no-op without a clip. If playback is running it continues
+    // from the new position. Atomic only: safe to call while
+    // render() is in flight (the generation bump stops a stale
+    // in-flight block from publishing its old end position).
+    void setPositionSeconds (double seconds);
+
+    bool isPlaying() const { return playing.load (std::memory_order_acquire); }
+
+    double getPositionSeconds() const;
+    double getDurationSeconds() const;
+
+    // True once after playback reached the end of the clip. The
+    // message thread consumes it to update the status display.
+    bool consumePlaybackEnded() { return endedFlag.exchange (false, std::memory_order_acq_rel); }
+
+    // Render one block of preview audio into the output buffer,
+    // overwriting it. Real-time safe. When the clip ends mid-block
+    // the remainder of the block is silence and playback stops.
+    void render (juce::AudioBuffer<float>& buffer, double hostSampleRate);
+
+private:
+    // Wait only on the message thread while replacing/destroying a clip.
+    void waitForRendererToFinish();
+
+    std::shared_ptr<const AudioClip> ownedClip; // message-thread owner
+    std::atomic<const AudioClip*> clipForAudio { nullptr };
+    std::atomic<int> renderersInFlight { 0 };
+    std::atomic<bool> playing { false };
+    std::atomic<double> positionSamples { 0.0 };
+    std::atomic<bool> endedFlag { false };
+    // Stop, pause and clip replacement increment this token. render()
+    // publishes its final cursor only if its token is still current.
+    std::atomic<std::uint64_t> transportGeneration { 0 };
+};
