@@ -121,6 +121,21 @@ public:
     // (reads lastErrorMessage). For Error this is the error message.
     juce::String getStatusText() const;
 
+    // Transient one-shot hint shown in the status LCD (e.g. "DRAG THIS
+    // ROW INTO FL STUDIO" after a plain click on the drag row). It
+    // never changes the Status itself. The editor shows it for a few
+    // seconds, then the normal status text returns. Message thread only.
+    void setStatusHint (const juce::String& hint)
+    {
+        statusHint = hint;
+        statusHintVersion.fetch_add (1, std::memory_order_acq_rel);
+    }
+    juce::String getStatusHint() const { return statusHint; }
+    int getStatusHintVersion() const
+    {
+        return statusHintVersion.load (std::memory_order_acquire);
+    }
+
     // Message thread only. The audio callback does not access this owner.
     std::shared_ptr<const AudioClip> getActiveClip() const { return activeClip; }
 
@@ -226,6 +241,34 @@ public:
         return melodyNotes != nullptr && ! melodyNotes->empty();
     }
 
+    // Manual pitch-curve correction (message thread). Takes the
+    // editor's edited analysis (frames already adjusted by
+    // NoteSegmenter::applyCurveEdit), replaces the stored analysis,
+    // re-runs note segmentation with the settings of the last analysis
+    // and re-renders the instrument when a sound is loaded, so the note
+    // blocks and PLAY INSTRUMENT follow the corrected curve. Returns
+    // false when the edited analysis has no pitch. A later RE-ANALYZE
+    // overwrites manual edits (see isPitchAnalysisEdited()).
+    bool commitPitchCurveEdit (const PitchAnalysisResult& editedAnalysis);
+    bool isPitchAnalysisEdited() const { return pitchAnalysisEdited; }
+
+    // Piano-key audition (message thread). startAudition() plays the
+    // given MIDI note until stopAudition(): the loaded one-shot pitched
+    // from its detected root, or a built-in sine tone when no sound is
+    // loaded, so a key always makes sound. Fixed velocity 0.8. The
+    // voice is mixed into the output in processBlock(); it never
+    // touches host MIDI out (SEND TO CHANNEL is a later phase).
+    void startAudition (int midiNote);
+    void stopAudition();
+    int getAuditionNote() const { return auditionNote.load (std::memory_order_acquire); }
+    bool isAuditioning() const { return getAuditionNote() >= 0; }
+
+    // Install the audition source (message thread): a mono copy of the
+    // loaded one-shot plus its detected root MIDI. Called when a sound
+    // finishes loading; also the direct entry point for tests. Pass
+    // nullptr to clear the source (sine fallback takes over).
+    void installAuditionSample (std::shared_ptr<const AudioClip> clip, int rootMidi);
+
     // Load a local one-shot instrument sample. Decoding, root-note
     // detection and rendering are asynchronous. The loaded sound is kept
     // when the melody is re-analysed and is rendered again for new notes.
@@ -289,6 +332,19 @@ private:
     void updateInputMeter (const juce::AudioBuffer<float>& buffer);
     void updateSilenceStatus (int numSamples);
 
+    // Keyboard audition voice (processBlock only). Mixes the held key
+    // into the output buffer (additive: preview keeps playing under
+    // it). Real-time safe: atomics only, no allocation/locks/IO.
+    void renderAudition (juce::AudioBuffer<float>& buffer, double hostRate);
+    // Message thread only: wait (bounded) until no audition render is
+    // in flight, so the sample buffer is never replaced under the
+    // audio thread. Mirrors AudioPreviewEngine::waitForRendererToFinish.
+    void waitForAuditionToFinish();
+
+    // Segmentation settings of the last completed analysis, reused by
+    // commitPitchCurveEdit so manual edits re-segment identically.
+    NoteSegmentationSettings makeNoteSegmentationSettings() const;
+
     AudioCaptureEngine captureEngine;
     AudioPreviewEngine previewEngine;
     AudioFileLoader fileLoader;
@@ -320,6 +376,41 @@ private:
     juce::String lastErrorMessage;
     juce::String instrumentDisplayText { "NO SOUND LOADED" };
     juce::String instrumentBaseName;
+
+    // Transient status hint (see setStatusHint). Message thread only.
+    juce::String statusHint;
+    std::atomic<int> statusHintVersion { 0 };
+
+    // Manual curve-edit bookkeeping (message thread only).
+    NoteSegmentationSettings lastNoteSettings;
+    bool pitchAnalysisEdited = false;
+
+    // Keyboard audition voice. The message thread owns the one-shot
+    // mono copy; the audio thread reads it through atomics + a
+    // generation bump and announces in-flight renders, so the message
+    // thread never replaces the buffer under it.
+    juce::AudioBuffer<float> auditionSampleBuffer; // mono one-shot copy
+    std::atomic<int> instrumentRootMidi { 60 };
+    std::atomic<int> auditionNote { -1 }; // MIDI note, -1 = off
+    std::atomic<const float*> auditionSampleData { nullptr };
+    std::atomic<int> auditionSampleLength { 0 };
+    std::atomic<double> auditionSampleRate { 44100.0 };
+    std::atomic<double> auditionPlaybackStep { 1.0 };
+    std::atomic<std::uint64_t> auditionGeneration { 0 };
+    std::atomic<int> auditionRenderersInFlight { 0 };
+    std::atomic<float> auditionGainAtomic { 0.0f }; // audio-thread writer
+
+    // Audio-thread-only audition voice state (touched in processBlock
+    // only, reset in prepareToPlay while the callback is suspended).
+    double auditionPhase = 0.0; // sine phase, radians
+    double auditionSamplePos = 0.0; // resample position in the one-shot
+    int auditionCurrentNote = -1;
+    std::uint64_t auditionLastGeneration = 0;
+    const float* auditionLatchedSampleData = nullptr;
+    int auditionLatchedSampleLength = 0;
+    double auditionLatchedStep = 1.0;
+    int auditionLatchedLoopStart = 0;
+    int auditionLatchedLoopLength = 1;
 
     // Audio-thread-only meter state (written in processBlock only,
     // reset in prepareToPlay while the callback is suspended).
