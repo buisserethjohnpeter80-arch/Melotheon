@@ -32,4 +32,11 @@ public:
         double outputSampleRate,
         CancelCallback shouldCancel = {},
         ProgressCallback reportProgress = {});
+
+    // Standalone root-note detection for the audition voice: analyzes
+    // the one-shot's mono buffer and returns the median pitch as a
+    // MIDI note (C4 = 60 when the sound is unpitched, noise or too
+    // short to analyze). Synchronous; callers run it on the message
+    // thread once when a sound is loaded, never per note.
+    static int detectRootMidi (const AudioClip& oneShot);
 };
