@@ -14,19 +14,20 @@
 
 namespace
 {
-// In-flight announcement for the audition voice: the message thread
-// waits for this counter to drain before replacing the sample buffer.
-// Same pattern as AudioPreviewEngine's RenderActivityGuard.
-class AuditionActivityGuard
+// In-flight announcement for the audition voice and the live MIDI-out
+// voice: the message thread waits for the counter to drain before
+// replacing the sample buffer / melody sequence. Same pattern as
+// AudioPreviewEngine's RenderActivityGuard.
+class ActivityGuard
 {
 public:
-    explicit AuditionActivityGuard (std::atomic<int>& counterToUse)
+    explicit ActivityGuard (std::atomic<int>& counterToUse)
         : counter (counterToUse)
     {
         counter.fetch_add (1, std::memory_order_seq_cst);
     }
 
-    ~AuditionActivityGuard()
+    ~ActivityGuard()
     {
         counter.fetch_sub (1, std::memory_order_seq_cst);
     }
@@ -51,6 +52,12 @@ MelotheonAudioProcessor::MelotheonAudioProcessor()
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "MelotheonState", createParameterLayout())
 {
+    // Cache the MIDI-out parameter atoms for the audio thread (see
+    // PluginProcessor.h): getRawParameterValue() does a map lookup,
+    // so it must never run inside processBlock().
+    midiOutParam = apvts.getRawParameterValue ("midiOut");
+    sendToChannelParam = apvts.getRawParameterValue ("sendToChannel");
+    midiChannelParam = apvts.getRawParameterValue ("midiChannel");
 }
 
 MelotheonAudioProcessor::~MelotheonAudioProcessor()
@@ -94,6 +101,11 @@ MelotheonAudioProcessor::createParameterLayout()
     // Right instrument panel: MIDI out toggle, play buttons.
     layout.add (std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID { "midiOut", 1 }, "MIDI Out", false));
+    // SEND TO CHANNEL: the per-melody switch for live MIDI out.
+    // The MIDI OUT toggle is the master switch; both must be on
+    // for the melody to stream to the host (see renderMidiOut).
+    layout.add (std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID { "sendToChannel", 1 }, "Send To Channel", false));
     layout.add (std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID { "playOriginal", 1 }, "Play Original", false));
     layout.add (std::make_unique<juce::AudioParameterBool>(
@@ -155,6 +167,9 @@ void MelotheonAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     auditionLatchedSampleLength = 0;
     auditionLatchedStep = 1.0;
 
+    // Fresh live MIDI-out state (the callback is suspended here).
+    resetMidiOutState();
+
     meterPeakLinear = 0.0f;
     meterRmsLinear = 0.0f;
     silentSamples = 0;
@@ -171,6 +186,10 @@ void MelotheonAudioProcessor::releaseResources()
     previewEngine.stop();
     instrumentPreviewEngine.stop();
     captureEngine.stopRecording(); // discard any unfinalized take
+
+    // The host owns all-notes-off on suspend; only the local state
+    // resets here, so a later resume re-syncs cleanly.
+    resetMidiOutState();
 }
 
 bool MelotheonAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -189,6 +208,11 @@ void MelotheonAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 {
     juce::ScopedNoDenormals noDenormals;
     midiMessages.clear();
+
+    // The preview position this block starts at, captured before any
+    // render advances it: the live MIDI-out scheduler below needs the
+    // block's exact time range.
+    const double midiBlockStartSeconds = getDisplayPreviewPositionSeconds();
 
     // 1. Input meter reads the incoming host audio (before any
     // preview overwrites the buffer).
@@ -212,7 +236,15 @@ void MelotheonAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // preview keeps playing under it). No-op when no key is held.
     renderAudition (buffer, hostSampleRate.load (std::memory_order_acquire));
 
-    // 5. READY <-> NO INPUT transitions (only from those states).
+    // 5. Live MIDI out (SEND TO CHANNEL): when MIDI OUT + SEND TO
+    // CHANNEL are on and a preview is playing, the current melody
+    // streams as note-on/note-off to the host, in time with the
+    // playhead. No-op otherwise (and it sends note-offs for every
+    // sounding note when sending stops).
+    renderMidiOut (midiMessages, midiBlockStartSeconds, buffer.getNumSamples(),
+                   hostSampleRate.load (std::memory_order_acquire));
+
+    // 6. READY <-> NO INPUT transitions (only from those states).
     updateSilenceStatus (buffer.getNumSamples());
 }
 
@@ -439,7 +471,7 @@ void MelotheonAudioProcessor::renderAudition (juce::AudioBuffer<float>& buffer,
     if (hostRate <= 0.0)
         return;
 
-    AuditionActivityGuard inFlightGuard (auditionRenderersInFlight);
+    ActivityGuard inFlightGuard (auditionRenderersInFlight);
 
     // A new generation (new sample or new note) re-latches the source
     // data, step and sustain-loop points and restarts the voice.
@@ -532,6 +564,182 @@ void MelotheonAudioProcessor::renderAudition (juce::AudioBuffer<float>& buffer,
     auditionGainAtomic.store (gain, std::memory_order_release);
 }
 
+// ---- Live MIDI out (SEND TO CHANNEL) ----
+
+void MelotheonAudioProcessor::publishMelodyNotes (
+    std::shared_ptr<const MelodyNoteSequence> notes)
+{
+    melodyNotes = std::move (notes);
+    melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
+    publishMidiOutSequence();
+}
+
+void MelotheonAudioProcessor::waitForMidiOutToFinish()
+{
+    // Bounded: the audio thread may be stopped (host idle), in which
+    // case nothing can read the sequence and waiting is pointless.
+    for (int i = 0; i < 2000; ++i)
+    {
+        if (midiOutRenderersInFlight.load (std::memory_order_seq_cst) == 0)
+            return;
+        std::this_thread::sleep_for (std::chrono::microseconds (50));
+    }
+}
+
+void MelotheonAudioProcessor::publishMidiOutSequence()
+{
+    waitForMidiOutToFinish();
+    midiOutSequenceForAudio.store (melodyNotes != nullptr ? melodyNotes.get() : nullptr,
+                                   std::memory_order_seq_cst);
+    midiOutGeneration.fetch_add (1, std::memory_order_acq_rel);
+}
+
+void MelotheonAudioProcessor::resetMidiOutState()
+{
+    midiOutLatchedSequence = nullptr;
+    midiOutLatchedGeneration = 0;
+    midiOutLastChannel = -1;
+    midiOutLastPosition = -1.0;
+    for (int i = 0; i < 128; ++i)
+    {
+        midiOutNoteOn[i] = false;
+        midiOutNoteChannel[i] = 0;
+    }
+}
+
+void MelotheonAudioProcessor::noteOnMidiOut (juce::MidiBuffer& midiMessages,
+                                            int sampleOffset,
+                                            const MelodyNote& note, int channel)
+{
+    const int midiNote = juce::jlimit (0, 127, note.midiNote);
+    // Same velocity mapping as the exported .mid file, so the live
+    // stream and the file sound identical.
+    const auto velocity = static_cast<juce::uint8> (std::clamp (
+        static_cast<int> (std::lround (note.velocity * 126.0f)), 1, 127));
+
+    // A note already sounding (e.g. re-triggered on another channel)
+    // is stopped first, so a channel change mid-note can never leave
+    // a stuck note.
+    if (midiOutNoteOn[midiNote])
+        noteOffMidiOut (midiMessages, sampleOffset, note);
+
+    midiMessages.addEvent (juce::MidiMessage::noteOn (
+        channel + 1, midiNote, velocity), sampleOffset);
+    midiOutNoteOn[midiNote] = true;
+    midiOutNoteChannel[midiNote] = channel;
+}
+
+void MelotheonAudioProcessor::noteOffMidiOut (juce::MidiBuffer& midiMessages,
+                                             int sampleOffset,
+                                             const MelodyNote& note)
+{
+    const int midiNote = juce::jlimit (0, 127, note.midiNote);
+    if (! midiOutNoteOn[midiNote])
+        return; // never send a note-off for a note that is not sounding
+
+    // The note-off goes to the channel the note-on was sent on, even
+    // if the user changed the channel dropdown since.
+    midiMessages.addEvent (juce::MidiMessage::noteOff (
+        midiOutNoteChannel[midiNote] + 1, midiNote), sampleOffset);
+    midiOutNoteOn[midiNote] = false;
+}
+
+void MelotheonAudioProcessor::allNotesOffMidiOut (juce::MidiBuffer& midiMessages,
+                                                 int sampleOffset)
+{
+    for (int midiNote = 0; midiNote < 128; ++midiNote)
+    {
+        if (! midiOutNoteOn[midiNote])
+            continue;
+        midiMessages.addEvent (juce::MidiMessage::noteOff (
+            midiOutNoteChannel[midiNote] + 1, midiNote), sampleOffset);
+        midiOutNoteOn[midiNote] = false;
+    }
+}
+
+void MelotheonAudioProcessor::renderMidiOut (juce::MidiBuffer& midiMessages,
+                                            double blockStartSeconds,
+                                            int numSamples, double hostRate)
+{
+    // The MIDI OUT toggle is the master switch and SEND TO CHANNEL is
+    // the per-melody switch: both must be on, and a preview (or
+    // instrument preview) must be playing, for any MIDI to leave.
+    const bool sending = midiOutEnabled() && sendToChannelEnabled()
+        && (previewEngine.isPlaying() || instrumentPreviewEngine.isPlaying());
+    if (! sending)
+    {
+        // Was sending: stop every sounding note cleanly in this
+        // block, so toggling off mid-note never sticks.
+        if (midiOutLastPosition >= 0.0)
+            allNotesOffMidiOut (midiMessages, 0);
+        midiOutLastPosition = -1.0;
+        return;
+    }
+
+    ActivityGuard inFlightGuard (midiOutRenderersInFlight);
+
+    const int channel = getMidiChannel() - 1; // 0-based here
+    const auto* sequence = midiOutSequenceForAudio.load (std::memory_order_seq_cst);
+    const std::uint64_t generation = midiOutGeneration.load (std::memory_order_acquire);
+
+    // Melody replaced or channel changed while sending: stop every
+    // sounding note on its original channel, then resync below.
+    if (generation != midiOutLatchedGeneration || sequence != midiOutLatchedSequence
+        || channel != midiOutLastChannel)
+    {
+        allNotesOffMidiOut (midiMessages, 0);
+        midiOutLatchedSequence = sequence;
+        midiOutLatchedGeneration = generation;
+        midiOutLastChannel = channel;
+        midiOutLastPosition = -1.0;
+    }
+
+    if (sequence == nullptr || sequence->empty() || hostRate <= 0.0 || numSamples <= 0)
+    {
+        midiOutLastPosition = -1.0;
+        return;
+    }
+
+    const double blockEndSeconds = blockStartSeconds
+        + static_cast<double> (numSamples) / hostRate;
+
+    // Sample offset for an event time, clamped inside this block. An
+    // event landing exactly on the block end is sent one sample early
+    // (it would otherwise be missed: the next block's range starts
+    // after it).
+    auto sampleOffsetFor = [blockStartSeconds, hostRate, numSamples] (double seconds)
+    {
+        return juce::jlimit (0, numSamples - 1, static_cast<int> (
+            std::floor ((seconds - blockStartSeconds) * hostRate)));
+    };
+
+    // Resync (start, seek, melody/channel change, or sending just
+    // enabled): notes containing the block start sound from offset 0.
+    if (midiOutLastPosition < 0.0
+        || std::abs (blockStartSeconds - midiOutLastPosition) > 0.005)
+    {
+        for (const auto& note : sequence->notes)
+        {
+            if (note.startSeconds <= blockStartSeconds && note.endSeconds > blockStartSeconds)
+                noteOnMidiOut (midiMessages, 0, note, channel);
+        }
+        midiOutLastPosition = blockEndSeconds;
+        return;
+    }
+
+    // Continuous playback: emit the starts/ends inside
+    // (lastPosition, blockEnd]. Notes are sorted by start and never
+    // overlap, so iterating in order emits events in time order.
+    for (const auto& note : sequence->notes)
+    {
+        if (note.startSeconds > midiOutLastPosition && note.startSeconds <= blockEndSeconds)
+            noteOnMidiOut (midiMessages, sampleOffsetFor (note.startSeconds), note, channel);
+        if (note.endSeconds > midiOutLastPosition && note.endSeconds <= blockEndSeconds)
+            noteOffMidiOut (midiMessages, sampleOffsetFor (note.endSeconds), note);
+    }
+    midiOutLastPosition = blockEndSeconds;
+}
+
 void MelotheonAudioProcessor::startFileImport (const juce::File& file)
 {
     if (! file.existsAsFile())
@@ -619,8 +827,7 @@ bool MelotheonAudioProcessor::startPitchAnalysis()
             if (pitchAnalysis->hasPitch())
             {
                 lastNoteSettings = makeNoteSegmentationSettings();
-                melodyNotes = NoteSegmenter::segment (*pitchAnalysis, lastNoteSettings);
-                melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
+                publishMelodyNotes (NoteSegmenter::segment (*pitchAnalysis, lastNoteSettings));
 
                 if (hasMelodyNotes())
                 {
@@ -635,8 +842,7 @@ bool MelotheonAudioProcessor::startPitchAnalysis()
             }
             else
             {
-                melodyNotes = std::make_shared<MelodyNoteSequence>();
-                melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
+                publishMelodyNotes (std::make_shared<MelodyNoteSequence>());
                 setStatus (Status::NoPitch);
             }
         },
@@ -673,8 +879,7 @@ bool MelotheonAudioProcessor::commitPitchCurveEdit (
     pitchAnalysis = std::make_shared<PitchAnalysisResult> (editedAnalysis);
     pitchAnalysisVersion.fetch_add (1, std::memory_order_acq_rel);
 
-    melodyNotes = NoteSegmenter::segment (*pitchAnalysis, lastNoteSettings);
-    melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
+    publishMelodyNotes (NoteSegmenter::segment (*pitchAnalysis, lastNoteSettings));
 
     pitchAnalysisEdited = true;
     setStatusHint ("CURVE EDITED - RE-ANALYZE TO RESET");
@@ -689,6 +894,37 @@ bool MelotheonAudioProcessor::commitPitchCurveEdit (
     {
         setStatus (Status::NoPitch);
     }
+    return true;
+}
+
+bool MelotheonAudioProcessor::commitMelodyEdit (
+    const MelodyNoteSequence& editedMelody,
+    const MelodyEditor::PitchShift& pitchShift)
+{
+    if (editedMelody.empty())
+        return false;
+
+    // A pitch move also shifts the underlying pitch frames in that
+    // note's time range by the same delta, so the orange curve and
+    // the note blocks stay in sync. Time-only moves leave the frames
+    // (and the recorded audio) alone.
+    if (pitchShift.active && pitchAnalysis != nullptr && pitchAnalysis->hasPitch())
+    {
+        auto editedAnalysis = std::make_shared<PitchAnalysisResult> (*pitchAnalysis);
+        NoteSegmenter::applyCurveEdit (*editedAnalysis, pitchShift.centreSeconds,
+                                       pitchShift.targetMidi, pitchShift.windowSeconds);
+        pitchAnalysis = std::move (editedAnalysis);
+        pitchAnalysisVersion.fetch_add (1, std::memory_order_acq_rel);
+    }
+
+    publishMelodyNotes (std::make_shared<MelodyNoteSequence> (editedMelody));
+
+    pitchAnalysisEdited = true;
+    setStatusHint ("MELODY EDITED - RE-ANALYZE TO RESET");
+
+    if (hasInstrumentSample())
+        startInstrumentRender();
+
     return true;
 }
 
@@ -891,8 +1127,7 @@ bool MelotheonAudioProcessor::exportMidiToFile (const juce::File& target)
     }
 
     MidiExportSettings settings;
-    settings.channel = juce::jlimit (1, 16, 1 + static_cast<int> (
-        apvts.getRawParameterValue ("midiChannel")->load()));
+    settings.channel = getMidiChannel();
     if (auto* hostPlayHead = getPlayHead(); hostPlayHead != nullptr)
     {
         if (const auto position = hostPlayHead->getPosition(); position.hasValue())
@@ -940,10 +1175,7 @@ void MelotheonAudioProcessor::clearPitchAnalysis()
         pitchAnalysisVersion.fetch_add (1, std::memory_order_acq_rel);
     }
     if (melodyNotes != nullptr)
-    {
-        melodyNotes.reset();
-        melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
-    }
+        publishMelodyNotes (nullptr);
     if (hasInstrumentSample())
     {
         instrumentDisplayText = instrumentBaseName + " / ANALYZE FIRST";
