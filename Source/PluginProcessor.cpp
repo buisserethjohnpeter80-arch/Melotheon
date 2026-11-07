@@ -400,7 +400,8 @@ bool MelotheonAudioProcessor::startPitchAnalysis()
                 const float transition = apvts.getRawParameterValue ("transition")->load();
                 const float variation = apvts.getRawParameterValue ("variation")->load();
                 noteSettings.minimumNoteSeconds = juce::jmap (
-                    juce::jlimit (0.0f, 1.0f, transition), 0.035, 0.120);
+                    static_cast<double> (juce::jlimit (0.0f, 1.0f, transition)),
+                    0.035, 0.120);
                 noteSettings.pitchHysteresisSemitones = juce::jmap (
                     juce::jlimit (0.0f, 1.0f, variation), 0.58f, 0.92f);
                 melodyNotes = NoteSegmenter::segment (*pitchAnalysis, noteSettings);
@@ -627,10 +628,10 @@ bool MelotheonAudioProcessor::exportMidiToFile (const juce::File& target)
     MidiExportSettings settings;
     settings.channel = juce::jlimit (1, 16, 1 + static_cast<int> (
         apvts.getRawParameterValue ("midiChannel")->load()));
-    if (auto* playHead = getPlayHead(); playHead != nullptr)
+    if (auto* hostPlayHead = getPlayHead(); hostPlayHead != nullptr)
     {
-        if (const auto position = playHead->getPosition(); position.has_value())
-            if (const auto bpm = position->getBpm(); bpm.has_value())
+        if (const auto position = hostPlayHead->getPosition(); position.hasValue())
+            if (const auto bpm = position->getBpm(); bpm.hasValue())
                 settings.bpm = *bpm;
     }
 

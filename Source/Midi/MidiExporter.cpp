@@ -16,7 +16,8 @@ juce::MidiFile MidiExporter::createMidiFile (
                                 * static_cast<double> (settings.ticksPerQuarterNote) / 60.0;
 
     juce::MidiMessageSequence track;
-    auto trackName = juce::MidiMessage::trackNameEvent ("Melotheon Melody");
+    // Standard MIDI meta-event type 3 is the sequence/track name.
+    auto trackName = juce::MidiMessage::textMetaEvent (3, "Melotheon Melody");
     trackName.setTimeStamp (0.0);
     track.addEvent (trackName);
 

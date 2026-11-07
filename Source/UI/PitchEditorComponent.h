@@ -26,10 +26,12 @@
 #include "../Analysis/MelodyNotes.h"
 #include "../Analysis/PitchAnalysis.h"
 
-class PitchEditorComponent : public juce::Component
+class PitchEditorComponent : public juce::Component,
+                             private juce::ScrollBar::Listener
 {
 public:
     PitchEditorComponent();
+    ~PitchEditorComponent() override;
 
     // Install a clip (message thread). nullptr restores the
     // placeholder view. The waveform peak cache is rebuilt here, so
@@ -91,6 +93,8 @@ private:
     void updateScrollBar();
     void setScrollOffset (double offset);
     int fittedNoteCount() const;
+    void scrollBarMoved (juce::ScrollBar* scrollBarThatHasMoved,
+                         double newRangeStart) override;
 
     bool isBlackKey (int midiNote) const;
     juce::String noteName (int midiNote) const;

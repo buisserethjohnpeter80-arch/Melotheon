@@ -49,13 +49,14 @@ PitchEditorComponent::PitchEditorComponent()
                                  Tokens::activeOrange.withAlpha (0.78f));
     verticalScrollBar.setColour (juce::ScrollBar::trackColourId,
                                  Tokens::border);
-    verticalScrollBar.onScroll = [this] (double offset)
-    {
-        if (! updatingScrollBar)
-            setScrollOffset (offset);
-    };
+    verticalScrollBar.addListener (this);
 
     fitToContent();
+}
+
+PitchEditorComponent::~PitchEditorComponent()
+{
+    verticalScrollBar.removeListener (this);
 }
 
 bool PitchEditorComponent::isBlackKey (int midiNote) const
@@ -285,6 +286,14 @@ void PitchEditorComponent::setScrollOffset (double requestedOffset)
     visibleLowestMidi = visibleHighestMidi - visibleCount + 1;
     updateScrollBar();
     repaint();
+}
+
+void PitchEditorComponent::scrollBarMoved (
+    juce::ScrollBar* scrollBarThatHasMoved,
+    double newRangeStart)
+{
+    if (scrollBarThatHasMoved == &verticalScrollBar && ! updatingScrollBar)
+        setScrollOffset (newRangeStart);
 }
 
 void PitchEditorComponent::updateScrollBar()
