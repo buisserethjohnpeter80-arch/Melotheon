@@ -17,7 +17,13 @@ namespace melotheon
 // Brand text. Written with explicit UTF-8 byte escapes so it renders
 // as MELOTHEON under any MSVC source codepage. Every other UI string
 // in the plugin is plain ASCII.
-inline const char* brandTextUtf8 = "MELOTH\xC3\x89ON";
+//
+// NOTE: this must stay a juce::String built with fromUTF8. A plain
+// juce::String (const char*) treats bytes above 127 as ASCII (JUCE 8
+// docs: "must not contain any characters with a value above 127"),
+// so the UTF-8 bytes C3 89 for E-acute were rendered as two Latin-1
+// characters, "MELOTHA^ON" with a missing-glyph box, in FL Studio.
+inline const juce::String brandTextUtf8 = juce::String::fromUTF8 ("MELOTH\xC3\x89ON");
 
 // Base design size in pixels. PluginEditor::resized() scales every
 // layout rectangle from these coordinates.
