@@ -97,11 +97,6 @@ MelotheonAudioProcessor::createParameterLayout()
         juce::StringArray { "LIVE INPUT", "IMPORTED AUDIO" },
         0));
     layout.add (std::make_unique<juce::AudioParameterChoice>(
-        juce::ParameterID { "instrumentTarget", 1 }, "Instrument",
-        juce::StringArray { "FLEX GRAND PIANO", "GRAND PIANO",
-                            "ELECTRIC PIANO", "STRINGS", "CHOIR PAD" },
-        0));
-    layout.add (std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID { "midiChannel", 1 }, "MIDI Channel",
         juce::StringArray { "CHANNEL 1", "CHANNEL 2", "CHANNEL 3",
                             "CHANNEL 4", "CHANNEL 5", "CHANNEL 6",
