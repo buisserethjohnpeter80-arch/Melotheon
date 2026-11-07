@@ -8,10 +8,33 @@
 #include "Analysis/NoteSegmenter.h"
 #include "Midi/MidiExporter.h"
 
+#include <chrono>
 #include <cmath>
+#include <thread>
 
 namespace
 {
+// In-flight announcement for the audition voice: the message thread
+// waits for this counter to drain before replacing the sample buffer.
+// Same pattern as AudioPreviewEngine's RenderActivityGuard.
+class AuditionActivityGuard
+{
+public:
+    explicit AuditionActivityGuard (std::atomic<int>& counterToUse)
+        : counter (counterToUse)
+    {
+        counter.fetch_add (1, std::memory_order_seq_cst);
+    }
+
+    ~AuditionActivityGuard()
+    {
+        counter.fetch_sub (1, std::memory_order_seq_cst);
+    }
+
+private:
+    std::atomic<int>& counter;
+};
+
 juce::String midiNoteName (int midiNote)
 {
     static const char* names[] = {
@@ -121,6 +144,17 @@ void MelotheonAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     previewEngine.stop();
     instrumentPreviewEngine.stop();
 
+    // Fresh audition voice state (the callback is suspended here).
+    auditionNote.store (-1, std::memory_order_release);
+    auditionGainAtomic.store (0.0f, std::memory_order_release);
+    auditionPhase = 0.0;
+    auditionSamplePos = 0.0;
+    auditionCurrentNote = -1;
+    auditionLastGeneration = 0;
+    auditionLatchedSampleData = nullptr;
+    auditionLatchedSampleLength = 0;
+    auditionLatchedStep = 1.0;
+
     meterPeakLinear = 0.0f;
     meterRmsLinear = 0.0f;
     silentSamples = 0;
@@ -133,6 +167,7 @@ void MelotheonAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
 
 void MelotheonAudioProcessor::releaseResources()
 {
+    stopAudition();
     previewEngine.stop();
     instrumentPreviewEngine.stop();
     captureEngine.stopRecording(); // discard any unfinalized take
@@ -173,7 +208,11 @@ void MelotheonAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     else if (previewEngine.isPlaying())
         previewEngine.render (buffer, hostSampleRate.load (std::memory_order_acquire));
 
-    // 4. READY <-> NO INPUT transitions (only from those states).
+    // 4. Keyboard audition mixes the held piano key on top (additive:
+    // preview keeps playing under it). No-op when no key is held.
+    renderAudition (buffer, hostSampleRate.load (std::memory_order_acquire));
+
+    // 5. READY <-> NO INPUT transitions (only from those states).
     updateSilenceStatus (buffer.getNumSamples());
 }
 
@@ -321,6 +360,178 @@ juce::File MelotheonAudioProcessor::prepareMidiDragFile()
     return tempFile;
 }
 
+// ---- Keyboard audition ----
+
+void MelotheonAudioProcessor::startAudition (int midiNote)
+{
+    const int note = juce::jlimit (0, 127, midiNote);
+    const double hostRate = hostSampleRate.load (std::memory_order_acquire);
+    const double sourceRate = auditionSampleRate.load (std::memory_order_acquire);
+    const int root = instrumentRootMidi.load (std::memory_order_acquire);
+    const bool hasSample = auditionSampleData.load (std::memory_order_acquire) != nullptr
+                        && auditionSampleLength.load (std::memory_order_acquire) > 1;
+    // Pitch the one-shot from its detected root; the sine fallback
+    // needs no step (its frequency comes from the note itself).
+    const double step = hasSample
+        ? std::pow (2.0, static_cast<double> (note - root) / 12.0)
+            * (sourceRate / (hostRate > 0.0 ? hostRate : 44100.0))
+        : 1.0;
+    auditionPlaybackStep.store (step, std::memory_order_release);
+    auditionGeneration.fetch_add (1, std::memory_order_acq_rel);
+    auditionNote.store (note, std::memory_order_release);
+}
+
+void MelotheonAudioProcessor::stopAudition()
+{
+    auditionNote.store (-1, std::memory_order_release);
+}
+
+void MelotheonAudioProcessor::installAuditionSample (
+    std::shared_ptr<const AudioClip> clip, int rootMidi)
+{
+    stopAudition();
+    waitForAuditionToFinish();
+
+    instrumentRootMidi.store (
+        juce::jlimit (0, 127, rootMidi), std::memory_order_release);
+    if (clip == nullptr || clip->isEmpty())
+    {
+        auditionSampleBuffer.setSize (1, 0, false, false, true);
+        auditionSampleRate.store (44100.0, std::memory_order_release);
+        auditionSampleData.store (nullptr, std::memory_order_release);
+        auditionSampleLength.store (0, std::memory_order_release);
+    }
+    else
+    {
+        const auto& mono = clip->analysisMonoBuffer;
+        auditionSampleBuffer.setSize (1, mono.getNumSamples(), false, false, true);
+        auditionSampleBuffer.copyFrom (0, 0, mono, 0, 0, mono.getNumSamples());
+        auditionSampleRate.store (
+            clip->sourceSampleRate > 0.0 ? clip->sourceSampleRate : 44100.0,
+            std::memory_order_release);
+        auditionSampleData.store (
+            auditionSampleBuffer.getReadPointer (0), std::memory_order_release);
+        auditionSampleLength.store (mono.getNumSamples(), std::memory_order_release);
+    }
+    auditionGeneration.fetch_add (1, std::memory_order_acq_rel);
+}
+
+void MelotheonAudioProcessor::waitForAuditionToFinish()
+{
+    // Bounded: the audio thread may be stopped (host idle), in which
+    // case nothing can read the buffer and waiting is pointless.
+    for (int i = 0; i < 2000; ++i)
+    {
+        if (auditionRenderersInFlight.load (std::memory_order_seq_cst) == 0
+            && auditionGainAtomic.load (std::memory_order_acquire) < 0.0005f)
+            return;
+        std::this_thread::sleep_for (std::chrono::microseconds (50));
+    }
+}
+
+void MelotheonAudioProcessor::renderAudition (juce::AudioBuffer<float>& buffer,
+                                              double hostRate)
+{
+    const int note = auditionNote.load (std::memory_order_acquire);
+    float gain = auditionGainAtomic.load (std::memory_order_acquire);
+    if (note < 0 && gain < 0.0005f)
+        return; // idle: no key held and the release tail is silent
+    if (hostRate <= 0.0)
+        return;
+
+    AuditionActivityGuard inFlightGuard (auditionRenderersInFlight);
+
+    // A new generation (new sample or new note) re-latches the source
+    // data, step and sustain-loop points and restarts the voice.
+    const std::uint64_t generation = auditionGeneration.load (std::memory_order_acquire);
+    if (generation != auditionLastGeneration)
+    {
+        auditionLastGeneration = generation;
+        auditionLatchedSampleData = auditionSampleData.load (std::memory_order_acquire);
+        auditionLatchedSampleLength = auditionSampleLength.load (std::memory_order_acquire);
+        auditionLatchedStep = auditionPlaybackStep.load (std::memory_order_acquire);
+        const int length = auditionLatchedSampleLength;
+        const double sourceRate = auditionSampleRate.load (std::memory_order_acquire);
+        auditionLatchedLoopStart = juce::jlimit (
+            0, std::max (0, length - 2),
+            static_cast<int> (sourceRate * 0.05));
+        const int loopEnd = std::max (auditionLatchedLoopStart + 1,
+            length - std::min (length / 8,
+                               static_cast<int> (sourceRate * 0.03)));
+        auditionLatchedLoopLength = std::max (1, loopEnd - auditionLatchedLoopStart);
+        auditionSamplePos = 0.0;
+        auditionPhase = 0.0;
+    }
+    if (note != auditionCurrentNote)
+    {
+        auditionCurrentNote = note;
+        auditionSamplePos = 0.0;
+        auditionPhase = 0.0;
+    }
+
+    const bool useSample = auditionLatchedSampleData != nullptr
+                        && auditionLatchedSampleLength > 1;
+    const float targetGain = note >= 0 ? (useSample ? 0.64f : 0.40f) : 0.0f;
+    // One-pole envelope: ~5 ms attack, ~40 ms release.
+    const double tau = targetGain > gain ? 0.005 : 0.040;
+    const float coeff = static_cast<float> (
+        1.0 - std::exp (-1.0 / (tau * hostRate)));
+
+    const double frequencyHz = note >= 0
+        ? 440.0 * std::pow (2.0, (static_cast<double> (note) - 69.0) / 12.0) : 0.0;
+    const double phaseStep = 2.0 * juce::MathConstants<double>::pi
+                           * frequencyHz / hostRate;
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+    const float* sampleData = auditionLatchedSampleData;
+    const int sampleLength = auditionLatchedSampleLength;
+
+    for (int n = 0; n < numSamples; ++n)
+    {
+        gain += (targetGain - gain) * coeff;
+        if (gain < 0.0005f && targetGain <= 0.0f)
+            break; // release tail finished; the rest stays silent
+
+        float sample = 0.0f;
+        if (note >= 0)
+        {
+            if (useSample)
+            {
+                // Linear-interpolated resample; past the end, loop the
+                // body (same sustain loop as the offline renderer) so
+                // a held key keeps sounding.
+                double position = auditionSamplePos;
+                if (position >= static_cast<double> (sampleLength - 1))
+                {
+                    position = static_cast<double> (auditionLatchedLoopStart)
+                        + std::fmod (position - auditionLatchedLoopStart,
+                                     static_cast<double> (auditionLatchedLoopLength));
+                }
+                const int index0 = static_cast<int> (position);
+                const int index1 = std::min (index0 + 1, sampleLength - 1);
+                const float fraction = static_cast<float> (
+                    position - static_cast<double> (index0));
+                sample = sampleData[index0]
+                       + (sampleData[index1] - sampleData[index0]) * fraction;
+                auditionSamplePos = position + auditionLatchedStep;
+            }
+            else
+            {
+                auditionPhase += phaseStep;
+                if (auditionPhase >= 2.0 * juce::MathConstants<double>::pi)
+                    auditionPhase -= 2.0 * juce::MathConstants<double>::pi;
+                sample = static_cast<float> (std::sin (auditionPhase));
+            }
+        }
+
+        const float out = sample * gain;
+        for (int ch = 0; ch < numChannels; ++ch)
+            buffer.addSample (ch, n, out);
+    }
+
+    auditionGainAtomic.store (gain, std::memory_order_release);
+}
+
 void MelotheonAudioProcessor::startFileImport (const juce::File& file)
 {
     if (! file.existsAsFile())
@@ -407,15 +618,8 @@ bool MelotheonAudioProcessor::startPitchAnalysis()
 
             if (pitchAnalysis->hasPitch())
             {
-                NoteSegmentationSettings noteSettings;
-                const float transition = apvts.getRawParameterValue ("transition")->load();
-                const float variation = apvts.getRawParameterValue ("variation")->load();
-                noteSettings.minimumNoteSeconds = juce::jmap (
-                    static_cast<double> (juce::jlimit (0.0f, 1.0f, transition)),
-                    0.035, 0.120);
-                noteSettings.pitchHysteresisSemitones = juce::jmap (
-                    juce::jlimit (0.0f, 1.0f, variation), 0.58f, 0.92f);
-                melodyNotes = NoteSegmenter::segment (*pitchAnalysis, noteSettings);
+                lastNoteSettings = makeNoteSegmentationSettings();
+                melodyNotes = NoteSegmenter::segment (*pitchAnalysis, lastNoteSettings);
                 melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
 
                 if (hasMelodyNotes())
@@ -445,6 +649,47 @@ void MelotheonAudioProcessor::cancelPitchAnalysis()
     pitchAnalysisEngine.cancel();
     if (getStatus() == Status::Analyzing)
         setStatus (hasActiveClip() ? Status::AudioReady : Status::Ready);
+}
+
+NoteSegmentationSettings MelotheonAudioProcessor::makeNoteSegmentationSettings() const
+{
+    NoteSegmentationSettings noteSettings;
+    const float transition = apvts.getRawParameterValue ("transition")->load();
+    const float variation = apvts.getRawParameterValue ("variation")->load();
+    noteSettings.minimumNoteSeconds = juce::jmap (
+        static_cast<double> (juce::jlimit (0.0f, 1.0f, transition)),
+        0.035, 0.120);
+    noteSettings.pitchHysteresisSemitones = juce::jmap (
+        juce::jlimit (0.0f, 1.0f, variation), 0.58f, 0.92f);
+    return noteSettings;
+}
+
+bool MelotheonAudioProcessor::commitPitchCurveEdit (
+    const PitchAnalysisResult& editedAnalysis)
+{
+    if (! editedAnalysis.hasPitch())
+        return false;
+
+    pitchAnalysis = std::make_shared<PitchAnalysisResult> (editedAnalysis);
+    pitchAnalysisVersion.fetch_add (1, std::memory_order_acq_rel);
+
+    melodyNotes = NoteSegmenter::segment (*pitchAnalysis, lastNoteSettings);
+    melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
+
+    pitchAnalysisEdited = true;
+    setStatusHint ("CURVE EDITED - RE-ANALYZE TO RESET");
+
+    if (hasMelodyNotes())
+    {
+        setStatus (Status::AnalysisReady);
+        if (hasInstrumentSample())
+            startInstrumentRender();
+    }
+    else
+    {
+        setStatus (Status::NoPitch);
+    }
+    return true;
 }
 
 void MelotheonAudioProcessor::setPlayOriginalParameter (bool shouldPlay)
@@ -477,6 +722,9 @@ void MelotheonAudioProcessor::startInstrumentFileImport (const juce::File& file)
     instrumentDisplayText = "LOADING SOUND";
     instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
     setStatus (Status::LoadingSound);
+    // The old sound is gone: stop any held audition key and drop the
+    // audition source (the new one installs when the load finishes).
+    installAuditionSample (nullptr, 60);
 
     auto alive = aliveFlag;
     instrumentFileLoader.loadFileAsync (
@@ -505,6 +753,12 @@ void MelotheonAudioProcessor::startInstrumentFileImport (const juce::File& file)
             }
 
             instrumentSample = std::move (loadResult.clip);
+            // Detect the root once, on load (synchronous, message
+            // thread; the one-shot is at most 15 s), so piano-key
+            // audition can pitch it immediately, even before ANALYZE.
+            installAuditionSample (
+                instrumentSample,
+                SampleInstrumentRenderer::detectRootMidi (*instrumentSample));
             instrumentBaseName = selectedName.substring (0, 22).toUpperCase();
             instrumentDisplayText = instrumentBaseName
                                   + (hasMelodyNotes() ? " / RENDERING"
@@ -679,6 +933,7 @@ void MelotheonAudioProcessor::clearPitchAnalysis()
     pitchAnalysisEngine.cancel();
     sampleRenderEngine.cancel();
     clearRenderedInstrument();
+    pitchAnalysisEdited = false;
     if (pitchAnalysis != nullptr)
     {
         pitchAnalysis.reset();
