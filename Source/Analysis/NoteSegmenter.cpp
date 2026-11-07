@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <numeric>
 
 namespace
@@ -214,4 +215,88 @@ std::shared_ptr<MelodyNoteSequence> NoteSegmenter::segment (
     }
 
     return sequence;
+}
+
+void NoteSegmenter::applyCurveEdit (PitchAnalysisResult& analysis,
+                                    double centreSeconds,
+                                    float targetMidi,
+                                    double windowSeconds)
+{
+    if (analysis.frames.empty() || analysis.hopSeconds <= 0.0
+        || windowSeconds <= 0.0)
+        return;
+
+    const float clampedTarget = std::clamp (targetMidi, 24.0f, 108.0f);
+    const int frameCount = static_cast<int> (analysis.frames.size());
+    const int centreIndex = static_cast<int> (std::llround (
+        centreSeconds / analysis.hopSeconds));
+    const int radiusFrames = static_cast<int> (std::ceil (
+        windowSeconds / analysis.hopSeconds));
+    const int first = std::max (0, centreIndex - radiusFrames);
+    const int last = std::min (frameCount - 1, centreIndex + radiusFrames);
+    if (first > last || centreIndex < 0 || centreIndex >= frameCount)
+        return;
+
+    // Reference pitch: the voiced frame nearest the grab point. The
+    // edit is a delta from this frame, so dragging horizontally at a
+    // constant height is a no-op instead of accumulating.
+    const PitchFrame* centreFrame = nullptr;
+    for (int distance = 0; distance <= radiusFrames; ++distance)
+    {
+        const int left = centreIndex - distance;
+        if (left >= 0 && analysis.frames[static_cast<size_t> (left)].voiced)
+        {
+            centreFrame = &analysis.frames[static_cast<size_t> (left)];
+            break;
+        }
+        const int right = centreIndex + distance;
+        if (distance != 0 && right < frameCount
+            && analysis.frames[static_cast<size_t> (right)].voiced)
+        {
+            centreFrame = &analysis.frames[static_cast<size_t> (right)];
+            break;
+        }
+    }
+    if (centreFrame == nullptr)
+        return;
+
+    const float delta = clampedTarget - centreFrame->midiPitch;
+    if (std::abs (delta) < 0.001f)
+        return;
+
+    for (int i = first; i <= last; ++i)
+    {
+        PitchFrame& frame = analysis.frames[static_cast<size_t> (i)];
+        if (! frame.voiced)
+            continue;
+
+        const double offsetSeconds = frame.timeSeconds - centreSeconds;
+        const double t = offsetSeconds / windowSeconds; // -1..1
+        // Raised-cosine falloff: 1 at the grab point, 0 at the edges.
+        const double weight = 0.5 * (1.0 + std::cos (std::numbers::pi * t));
+        if (weight <= 0.0)
+            continue;
+
+        frame.midiPitch = std::clamp (
+            frame.midiPitch + static_cast<float> (delta * weight),
+            24.0f, 108.0f);
+        frame.frequencyHz = static_cast<float> (
+            440.0 * std::pow (2.0, (static_cast<double> (frame.midiPitch) - 69.0) / 12.0));
+    }
+
+    // Keep the range metadata honest so FIT still frames the curve.
+    float low = std::numeric_limits<float>::max();
+    float high = std::numeric_limits<float>::lowest();
+    for (const auto& frame : analysis.frames)
+    {
+        if (! frame.voiced)
+            continue;
+        low = std::min (low, frame.midiPitch);
+        high = std::max (high, frame.midiPitch);
+    }
+    if (low <= high)
+    {
+        analysis.minMidi = low;
+        analysis.maxMidi = high;
+    }
 }
