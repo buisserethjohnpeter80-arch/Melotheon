@@ -11,10 +11,9 @@
 #   cmake --build build --config Release
 # The .vst3 bundle lands under build/Melotheon_artefacts/Release/VST3/.
 #
-# Phase 2 scope: audio foundation (capture, import, preview, meter,
-# status, real waveform) on top of the Phase 1 interface. Still no
-# pitch detection, no MIDI generation, no instrument hosting
-# (see README.md). The processor passes audio through unchanged while
+# Phase 3C scope: audio foundation, offline monophonic pitch tracking,
+# stable note segmentation, standard MIDI export and local one-shot
+# instrument rendering. The processor passes audio through unchanged while
 # preview is inactive.
 
 cmake_minimum_required(VERSION 3.22)
@@ -66,6 +65,12 @@ target_sources(Melotheon
         Source/Audio/AudioCaptureEngine.cpp
         Source/Audio/AudioFileLoader.cpp
         Source/Audio/AudioPreviewEngine.cpp
+        Source/Audio/SampleInstrumentRenderer.cpp
+        Source/Audio/SampleRenderEngine.cpp
+        Source/Analysis/MonophonicPitchAnalyzer.cpp
+        Source/Analysis/NoteSegmenter.cpp
+        Source/Analysis/PitchAnalysisEngine.cpp
+        Source/Midi/MidiExporter.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp
@@ -105,13 +110,16 @@ target_link_libraries(Melotheon
         juce::juce_recommended_warning_flags
 )
 
-# ---- Phase 2 unit tests (console app, no GUI, no host) ----
-# Covers the audio foundation: stereo-to-mono conversion, mono copy,
+# ---- Phase 3C unit tests (console app, no GUI, no host) ----
+# Covers the audio foundation: adaptive stereo-to-mono conversion, mono copy,
 # capture limits / state transitions, preview state transitions and
 # resampling, file-loader rejection + valid WAV round-trip, AudioClip
-# metadata, and processor pass-through. The test target is built by
+# metadata, processor pass-through, and monophonic pitch tracking at
+# several source rates. The test target is built by
 # the normal build (including Windows CI) so a broken test breaks
-# the build; run it with `ctest --test-dir build -C Release`.
+# the build. Windows CI also executes it and validates the final VST3
+# bundle with pluginval. Run locally with
+# `ctest --test-dir build -C Release --output-on-failure`.
 include(CTest)
 
 # juce_add_console_app (not plain add_executable): only targets
@@ -127,6 +135,12 @@ target_sources(MelotheonTests
         Source/Audio/AudioCaptureEngine.cpp
         Source/Audio/AudioFileLoader.cpp
         Source/Audio/AudioPreviewEngine.cpp
+        Source/Audio/SampleInstrumentRenderer.cpp
+        Source/Audio/SampleRenderEngine.cpp
+        Source/Analysis/MonophonicPitchAnalyzer.cpp
+        Source/Analysis/NoteSegmenter.cpp
+        Source/Analysis/PitchAnalysisEngine.cpp
+        Source/Midi/MidiExporter.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp

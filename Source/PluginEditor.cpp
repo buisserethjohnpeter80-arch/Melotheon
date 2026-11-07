@@ -1,12 +1,13 @@
-// MelotheonAudioProcessorEditor implementation (Phase 2).
+// MelotheonAudioProcessorEditor implementation (Phase 3C).
 // See PluginEditor.h for the layout contract: Phase 1 interface with
-// the Phase 2 audio foundation wired in (record / import / preview /
-// meter / waveform / status). ANALYZE, SEND TO CHANNEL, DRAG MIDI TO
-// FL and PLAY INSTRUMENT are still non-functional.
+// the audio foundation, monophonic pitch analysis, MIDI export and
+// local sample-instrument melody preview.
 
 #include "PluginEditor.h"
 
 #include "Audio/AudioFileLoader.h"
+
+#include <algorithm>
 
 namespace
 {
@@ -43,6 +44,19 @@ constexpr int kKnobCentres[] = { 108, 252, 397, 541, 686 };
 constexpr int kKeyX = 880, kKeyY = 468, kKeyW = 190, kKeyH = 44;
 constexpr int kAnalyzeX = 1095, kAnalyzeY = 468, kAnalyzeW = 140, kAnalyzeH = 44;
 constexpr int kSendX = 1245, kSendY = 468, kSendW = 145, kSendH = 44;
+
+juce::String formatPitchFrame (const PitchFrame& frame)
+{
+    static const char* noteNames[] = {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
+    const int midi = juce::roundToInt (frame.midiPitch);
+    const int pitchClass = ((midi % 12) + 12) % 12;
+    const int octave = midi / 12 - 1;
+    return juce::String (noteNames[pitchClass]) + juce::String (octave)
+         + "   " + juce::String (frame.frequencyHz, 1) + " Hz   "
+         + juce::String (juce::roundToInt (frame.confidence * 100.0f)) + "%";
+}
 } // namespace
 
 MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProcessor& processorToUse)
@@ -117,7 +131,9 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
     // and returns the cursor to the beginning.
     stopButton.onClick = [this]
     {
-        if (audioProcessor.isRecording())
+        if (audioProcessor.isPitchAnalyzing())
+            audioProcessor.cancelPitchAnalysis();
+        else if (audioProcessor.isRecording())
             audioProcessor.stopRecording();
         else
             audioProcessor.stopPreview();
@@ -138,7 +154,7 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
     addAndMakeVisible (noteLabel);
     styleLcdLabel (noteLabel);
-    noteLabel.setText ("A3   220.0 Hz", juce::dontSendNotification);
+    noteLabel.setText ("PITCH --", juce::dontSendNotification);
 
     // ---- Left capture panel ----
     addAndMakeVisible (liveInputLabel);
@@ -171,17 +187,13 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
     addAndMakeVisible (instrumentBox);
     styleComboBox (instrumentBox);
-    instrumentBox.addItem ("FLEX GRAND PIANO", 1);
-    instrumentBox.addItem ("GRAND PIANO", 2);
-    instrumentBox.addItem ("ELECTRIC PIANO", 3);
-    instrumentBox.addItem ("STRINGS", 4);
-    instrumentBox.addItem ("CHOIR PAD", 5);
+    instrumentBox.addItem ("NO SOUND LOADED", 1);
+    instrumentBox.setSelectedId (1, juce::dontSendNotification);
+    instrumentBox.setTooltip ("Loaded one-shot instrument sound");
 
     addAndMakeVisible (instrumentFolderButton);
-    instrumentFolderButton.onClick = []
-    {
-        // TODO: PHASE_3_AUDIO_LOGIC
-    };
+    instrumentFolderButton.setTooltip ("Load a local instrument one-shot");
+    instrumentFolderButton.onClick = [this] { startInstrumentImport(); };
 
     addAndMakeVisible (midiOutButton);
 
@@ -191,11 +203,9 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
         midiChannelBox.addItem ("CHANNEL " + juce::String (ch), ch);
 
     addAndMakeVisible (dragMidiButton);
-    dragMidiButton.setText ("DRAG MIDI TO FL");
-    dragMidiButton.onClick = []
-    {
-        // TODO: PHASE_3_AUDIO_LOGIC
-    };
+    dragMidiButton.setText ("EXPORT MIDI");
+    dragMidiButton.setTooltip ("Export the detected melody as a .mid file");
+    dragMidiButton.onClick = [this] { startMidiExport(); };
 
     addAndMakeVisible (playOriginalButton);
     playOriginalButton.setText ("PLAY ORIGINAL");
@@ -228,6 +238,26 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
     addAndMakeVisible (playInstrumentButton);
     playInstrumentButton.setText ("PLAY INSTRUMENT");
     playInstrumentButton.setClickingTogglesState (true);
+    playInstrumentButton.setTooltip ("Replay the melody with the loaded sound");
+    playInstrumentButton.onClick = [this]
+    {
+        if (playInstrumentButton.getToggleState())
+        {
+            if (audioProcessor.startInstrumentPreview())
+            {
+                playButton.setToggleState (false, juce::dontSendNotification);
+                playOriginalButton.setToggleState (false, juce::dontSendNotification);
+            }
+            else
+            {
+                audioProcessor.setPlayInstrumentParameter (false);
+            }
+        }
+        else
+        {
+            audioProcessor.pauseInstrumentPreview();
+        }
+    };
 
     // ---- Bottom correction strip ----
     addAndMakeVisible (centerKnob);
@@ -263,9 +293,20 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
     addAndMakeVisible (analyzeButton);
     styleTextButton (analyzeButton, Tokens::activeOrange, juce::Colours::black);
-    analyzeButton.onClick = []
+    analyzeButton.onClick = [this]
     {
-        // TODO: PHASE_3_AUDIO_LOGIC
+        if (audioProcessor.isPitchAnalyzing())
+        {
+            audioProcessor.cancelPitchAnalysis();
+            return;
+        }
+
+        if (audioProcessor.startPitchAnalysis())
+        {
+            recordButton.setToggleState (false, juce::dontSendNotification);
+            playButton.setToggleState (false, juce::dontSendNotification);
+            audioProcessor.setPlayOriginalParameter (false);
+        }
     };
 
     addAndMakeVisible (sendToChannelButton);
@@ -299,13 +340,11 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
         apvts, "playInstrument", playInstrumentButton);
     inputSourceAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         apvts, "inputSource", inputSourceBox);
-    instrumentAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        apvts, "instrumentTarget", instrumentBox);
     midiChannelAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         apvts, "midiChannel", midiChannelBox);
 
     updateKeyLabel();
-    // ~30 Hz: meter, playhead, status and clip polling.
+    // ~30 Hz: meter, playhead, status, analysis progress and clip polling.
     startTimer (33);
 
     setResizable (true, true);
@@ -318,8 +357,8 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
 
 MelotheonAudioProcessorEditor::~MelotheonAudioProcessorEditor()
 {
-    editorAlive->store (false, std::memory_order_release);
     stopTimer();
+    fileChooser.reset();
     setLookAndFeel (nullptr);
 }
 
@@ -328,22 +367,94 @@ void MelotheonAudioProcessorEditor::startImport()
     if (fileChooser != nullptr)
         return; // a chooser is already open
 
-    fileChooser = std::make_unique<juce::FileChooser> (
+    auto chooser = std::make_shared<juce::FileChooser> (
         "Import Audio", juce::File{}, AudioFileLoader::getFileFilter());
+    fileChooser = chooser;
 
-    auto alive = editorAlive;
-    fileChooser->launchAsync (
+    juce::Component::SafePointer<MelotheonAudioProcessorEditor> safeEditor (this);
+    chooser->launchAsync (
         juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-        [this, alive] (const juce::FileChooser& chooser)
+        [safeEditor, chooser] (const juce::FileChooser& completedChooser)
         {
-            fileChooser.reset();
+            const juce::File file = completedChooser.getResult();
 
-            if (! alive->load (std::memory_order_acquire))
+            if (safeEditor == nullptr)
                 return; // editor was closed while choosing
 
-            const juce::File file = chooser.getResult();
+            // Reset only the chooser that produced this callback. The
+            // captured shared_ptr keeps it alive until this lambda ends.
+            if (safeEditor->fileChooser == chooser)
+                safeEditor->fileChooser.reset();
+
             if (file.existsAsFile())
-                audioProcessor.startFileImport (file);
+                safeEditor->audioProcessor.startFileImport (file);
+        });
+}
+
+void MelotheonAudioProcessorEditor::startInstrumentImport()
+{
+    if (fileChooser != nullptr)
+        return;
+
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Load Instrument Sound", juce::File{}, AudioFileLoader::getFileFilter());
+    fileChooser = chooser;
+
+    juce::Component::SafePointer<MelotheonAudioProcessorEditor> safeEditor (this);
+    chooser->launchAsync (
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [safeEditor, chooser] (const juce::FileChooser& completedChooser)
+        {
+            const juce::File file = completedChooser.getResult();
+            if (safeEditor == nullptr)
+                return;
+
+            if (safeEditor->fileChooser == chooser)
+                safeEditor->fileChooser.reset();
+
+            if (file.existsAsFile())
+                safeEditor->audioProcessor.startInstrumentFileImport (file);
+        });
+}
+
+void MelotheonAudioProcessorEditor::startMidiExport()
+{
+    if (fileChooser != nullptr)
+        return;
+
+    if (! audioProcessor.hasMelodyNotes())
+    {
+        // Let the processor publish the same actionable LCD error used by
+        // every other export entry point.
+        audioProcessor.exportMidiToFile (juce::File{});
+        return;
+    }
+
+    const juce::File suggested = juce::File::getSpecialLocation (
+        juce::File::userDocumentsDirectory).getChildFile ("Melotheon Melody.mid");
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Export Melody as MIDI", suggested, "*.mid");
+    fileChooser = chooser;
+
+    juce::Component::SafePointer<MelotheonAudioProcessorEditor> safeEditor (this);
+    chooser->launchAsync (
+        juce::FileBrowserComponent::saveMode
+            | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::warnAboutOverwriting,
+        [safeEditor, chooser] (const juce::FileChooser& completedChooser)
+        {
+            juce::File file = completedChooser.getResult();
+            if (safeEditor == nullptr)
+                return;
+
+            if (safeEditor->fileChooser == chooser)
+                safeEditor->fileChooser.reset();
+
+            if (file != juce::File{})
+            {
+                file = file.withFileExtension ("mid");
+                safeEditor->audioProcessor.exportMidiToFile (file);
+            }
         });
 }
 
@@ -440,7 +551,8 @@ void MelotheonAudioProcessorEditor::timerCallback()
     {
         lastStatusSeen = statusId;
         const bool isWarning = (status == MelotheonAudioProcessor::Status::Error
-                             || status == MelotheonAudioProcessor::Status::LimitReached);
+                             || status == MelotheonAudioProcessor::Status::LimitReached
+                             || status == MelotheonAudioProcessor::Status::NoPitch);
         statusLabel.setColour (juce::Label::textColourId,
                                isWarning ? Tokens::activeOrange : Tokens::statusGreen);
     }
@@ -457,8 +569,72 @@ void MelotheonAudioProcessorEditor::timerCallback()
         pitchEditor.setClip (audioProcessor.getActiveClip());
     }
 
+    // ---- Pitch-analysis result and progress. ----
+    const int analysisVersion = audioProcessor.getPitchAnalysisVersion();
+    if (analysisVersion != lastAnalysisVersionSeen)
+    {
+        lastAnalysisVersionSeen = analysisVersion;
+        displayedAnalysis = audioProcessor.getPitchAnalysis();
+        pitchEditor.setPitchAnalysis (displayedAnalysis);
+    }
+
+    const int melodyNotesVersion = audioProcessor.getMelodyNotesVersion();
+    if (melodyNotesVersion != lastMelodyNotesVersionSeen)
+    {
+        lastMelodyNotesVersionSeen = melodyNotesVersion;
+        displayedNotes = audioProcessor.getMelodyNotes();
+        pitchEditor.setNoteSequence (displayedNotes);
+    }
+
+    const int instrumentVersion = audioProcessor.getInstrumentVersion();
+    if (instrumentVersion != lastInstrumentVersionSeen)
+    {
+        lastInstrumentVersionSeen = instrumentVersion;
+        instrumentBox.changeItemText (1, audioProcessor.getInstrumentDisplayText());
+        instrumentBox.setSelectedId (1, juce::dontSendNotification);
+    }
+
+    const bool analyzing = audioProcessor.isPitchAnalyzing();
+    const float analysisProgress = audioProcessor.getPitchAnalysisProgress();
+    pitchEditor.setAnalysisProgress (analyzing ? analysisProgress : -1.0f);
+
+    const juce::String analyzeText = analyzing
+        ? "CANCEL" : (displayedAnalysis != nullptr ? "RE-ANALYZE" : "ANALYZE");
+    if (analyzeText != lastAnalyzeButtonText)
+    {
+        lastAnalyzeButtonText = analyzeText;
+        analyzeButton.setButtonText (analyzeText);
+    }
+
+    juce::String noteText = "PITCH --";
+    if (analyzing)
+    {
+        noteText = "PITCH   "
+                 + juce::String (juce::roundToInt (analysisProgress * 100.0f)) + "%";
+    }
+    else if (displayedAnalysis != nullptr && displayedAnalysis->hasPitch())
+    {
+        const double position = audioProcessor.getDisplayPreviewPositionSeconds();
+        const PitchFrame* frame = displayedAnalysis->findNearestVoicedFrame (position);
+        if (frame == nullptr && position <= 0.001)
+        {
+            const auto found = std::find_if (
+                displayedAnalysis->frames.begin(), displayedAnalysis->frames.end(),
+                [] (const PitchFrame& candidate) { return candidate.voiced; });
+            if (found != displayedAnalysis->frames.end())
+                frame = &*found;
+        }
+        if (frame != nullptr)
+            noteText = formatPitchFrame (*frame);
+    }
+    if (noteText != lastNoteText)
+    {
+        lastNoteText = noteText;
+        noteLabel.setText (noteText, juce::dontSendNotification);
+    }
+
     // ---- Playhead follows preview playback. ----
-    pitchEditor.setPlayheadPosition (audioProcessor.getPreviewPositionSeconds());
+    pitchEditor.setPlayheadPosition (audioProcessor.getDisplayPreviewPositionSeconds());
 
     // ---- Playback ended naturally: STOPPED + untoggle preview. ----
     if (audioProcessor.consumePlaybackEnded())
@@ -466,6 +642,11 @@ void MelotheonAudioProcessorEditor::timerCallback()
         audioProcessor.setStatus (MelotheonAudioProcessor::Status::Stopped);
         audioProcessor.setPlayOriginalParameter (false);
         playButton.setToggleState (false, juce::dontSendNotification);
+    }
+    if (audioProcessor.consumeInstrumentPlaybackEnded())
+    {
+        audioProcessor.setStatus (MelotheonAudioProcessor::Status::InstrumentReady);
+        audioProcessor.setPlayInstrumentParameter (false);
     }
 
     // ---- A take that hit the 60 s limit is finalized here (message
@@ -479,6 +660,7 @@ void MelotheonAudioProcessorEditor::timerCallback()
         recordButton.setToggleState (recording, juce::dontSendNotification);
 
     const bool playing = audioProcessor.isPreviewPlaying();
+    const bool instrumentPlaying = audioProcessor.isInstrumentPreviewPlaying();
     if (playButton.getToggleState() != playing)
         playButton.setToggleState (playing, juce::dontSendNotification);
 
@@ -486,6 +668,13 @@ void MelotheonAudioProcessorEditor::timerCallback()
     {
         lastPlayOriginalParam = playing;
         audioProcessor.setPlayOriginalParameter (playing);
+    }
+    if (playInstrumentButton.getToggleState() != instrumentPlaying)
+        playInstrumentButton.setToggleState (instrumentPlaying, juce::dontSendNotification);
+    if (lastPlayInstrumentParam != instrumentPlaying)
+    {
+        lastPlayInstrumentParam = instrumentPlaying;
+        audioProcessor.setPlayInstrumentParameter (instrumentPlaying);
     }
 }
 

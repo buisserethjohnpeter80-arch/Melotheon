@@ -8,11 +8,10 @@
 // data - a fixed monophonic melody, a subtle grey waveform behind
 // the notes and one green playhead.
 //
-// After a clip is loaded (Phase 2): the placeholder notes and pitch
-// curve are hidden (no pitch analysis has happened yet). The real
-// waveform of the active clip is drawn from a cached min/max peak
-// table, the green playhead follows preview playback, and a small
-// centered message reads "AUDIO READY · CLICK ANALYZE".
+// After a clip is loaded: the real waveform is drawn from a cached
+// min/max peak table. The real monophonic pitch curve and segmented
+// MIDI-note blocks are overlaid. The keyboard has professional vertical
+// navigation: +/- zoom, FIT, a scrollbar and mouse-wheel scrolling.
 //
 // Layout: piano keyboard on the left (C3 at the bottom, C5 at the
 // top), bar numbers 1-4 across the top, 4 bars of 4 beats each.
@@ -24,16 +23,30 @@
 #include <vector>
 
 #include "../Audio/AudioClip.h"
+#include "../Analysis/MelodyNotes.h"
+#include "../Analysis/PitchAnalysis.h"
 
-class PitchEditorComponent : public juce::Component
+class PitchEditorComponent : public juce::Component,
+                             private juce::ScrollBar::Listener
 {
 public:
-    PitchEditorComponent() = default;
+    PitchEditorComponent();
+    ~PitchEditorComponent() override;
 
     // Install a clip (message thread). nullptr restores the
     // placeholder view. The waveform peak cache is rebuilt here, so
     // paint() never scans audio.
     void setClip (std::shared_ptr<const AudioClip> clip);
+
+    // Install/clear the immutable worker result. The pitch range is
+    // fitted automatically while preserving the same piano-roll style.
+    void setPitchAnalysis (std::shared_ptr<const PitchAnalysisResult> analysis);
+    void setNoteSequence (std::shared_ptr<const MelodyNoteSequence> notes);
+
+    // 0..1 while the worker is active, negative when idle. This only
+    // changes the centered helper text; progress also appears in the
+    // header LCD.
+    void setAnalysisProgress (float progress);
 
     // Preview playhead position in seconds. Only used while a clip
     // is loaded; negative values restore the static placeholder
@@ -42,6 +55,10 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+    void mouseWheelMove (const juce::MouseEvent& event,
+                         const juce::MouseWheelDetails& wheel) override;
+
+    float getVerticalZoom() const { return verticalZoom; }
 
 private:
     struct Note
@@ -55,12 +72,15 @@ private:
     static const Note placeholderNotes[];
     static constexpr int numPlaceholderNotes = 12;
 
-    static constexpr int lowestMidi = 48; // C3
-    static constexpr int highestMidi = 72; // C5
+    static constexpr int defaultLowestMidi = 48; // C3
+    static constexpr int defaultHighestMidi = 72; // C5
+    static constexpr int absoluteLowestMidi = 24; // C1
+    static constexpr int absoluteHighestMidi = 108; // C8
     static constexpr int totalBeats = 16; // 4 bars x 4 beats
     static constexpr int beatsPerBar = 4;
-    static constexpr float keyboardWidth = 70.0f;
-    static constexpr float barNumberHeight = 18.0f;
+    static constexpr float keyboardWidth = 94.0f;
+    static constexpr float barNumberHeight = 26.0f;
+    static constexpr float scrollBarWidth = 13.0f;
 
     // Fixed-resolution peak cache for the real waveform: one
     // (min, max) pair per column, computed once in setClip() from
@@ -68,11 +88,33 @@ private:
     static constexpr int waveformColumns = 1024;
 
     void rebuildWaveformCache();
+    void fitToContent();
+    void changeZoom (float multiplier);
+    void updateScrollBar();
+    void setScrollOffset (double offset);
+    int fittedNoteCount() const;
+    void scrollBarMoved (juce::ScrollBar* scrollBarThatHasMoved,
+                         double newRangeStart) override;
 
     bool isBlackKey (int midiNote) const;
     juce::String noteName (int midiNote) const;
+    std::pair<int, int> visibleMidiRange() const;
 
     std::shared_ptr<const AudioClip> activeClip;
+    std::shared_ptr<const PitchAnalysisResult> pitchAnalysis;
+    std::shared_ptr<const MelodyNoteSequence> noteSequence;
     std::vector<std::pair<float, float>> waveformPeaks;
     double playheadSeconds = -1.0;
+    float analysisProgress = -1.0f;
+
+    juce::TextButton zoomOutButton { "-" };
+    juce::TextButton fitButton { "FIT" };
+    juce::TextButton zoomInButton { "+" };
+    juce::ScrollBar verticalScrollBar { true };
+    float verticalZoom = 1.0f;
+    int fittedLowestMidi = defaultLowestMidi;
+    int fittedHighestMidi = defaultHighestMidi;
+    int visibleLowestMidi = defaultLowestMidi;
+    int visibleHighestMidi = defaultHighestMidi;
+    bool updatingScrollBar = false;
 };
