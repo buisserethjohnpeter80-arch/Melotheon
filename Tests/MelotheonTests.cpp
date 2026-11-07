@@ -14,6 +14,7 @@
 #include "Audio/AudioFileLoader.h"
 #include "Audio/AudioPreviewEngine.h"
 #include "Audio/SampleInstrumentRenderer.h"
+#include "Analysis/MelodyEditor.h"
 #include "Analysis/MonophonicPitchAnalyzer.h"
 #include "Analysis/NoteSegmenter.h"
 #include "Analysis/PitchAnalysis.h"
@@ -22,6 +23,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <vector>
 
 namespace
 {
@@ -1157,6 +1159,346 @@ void testProcessorTransportExclusion()
     processor.stopPreview();
 }
 
+// ---- Note editor (MOVE / CUT / STRETCH) ----
+
+void testMelodyEditorMoveSplitStretch()
+{
+    MelodyNoteSequence melody;
+    melody.durationSeconds = 1.6; // 16 display beats of 0.1 s
+    melody.lowestMidi = 60;
+    melody.highestMidi = 64;
+    melody.notes = {
+        { 0.0, 0.4, 60, 60.0f, 0.8f, 0.95f },
+        { 0.5, 0.9, 64, 64.0f, 0.7f, 0.90f },
+        { 1.0, 1.4, 62, 62.0f, 0.8f, 0.92f },
+    };
+
+    // Beat snap: 16 beats over 1.6 s -> 0.1 s per beat.
+    CHECK_NEAR ((float) MelodyEditor::snapSecondsToDisplayBeat (0.24, 1.6), 0.2f, 1e-6f);
+    CHECK_NEAR ((float) MelodyEditor::snapSecondsToDisplayBeat (0.26, 1.6), 0.3f, 1e-6f);
+    // Snap-if-close: 0.24 s is 0.4 beats from 0.2 s -> no snap;
+    // 0.21 s is 0.1 beats away -> snaps to the beat.
+    CHECK_NEAR ((float) MelodyEditor::snapSecondsToDisplayBeatIfClose (0.24, 1.6), 0.24f, 1e-6f);
+    CHECK_NEAR ((float) MelodyEditor::snapSecondsToDisplayBeatIfClose (0.21, 1.6), 0.2f, 1e-6f);
+
+    // MOVE note 1 (64) up 2 semitones and 0.1 s later.
+    CHECK (MelodyEditor::moveNote (melody, 1, 0.6, 66, 1.6));
+    CHECK (melody.notes[1].midiNote == 66);
+    CHECK_NEAR ((float) melody.notes[1].startSeconds, 0.6f, 1e-6f);
+    CHECK_NEAR ((float) melody.notes[1].endSeconds, 1.0f, 1e-6f);
+    CHECK (melody.highestMidi == 66);
+
+    // MOVE note 1 into its neighbour: clamped to the gap (note 2
+    // starts at 1.0 s, note 1 is 0.4 s long -> start <= 0.6 s).
+    CHECK (MelodyEditor::moveNote (melody, 1, 0.95, 66, 1.6));
+    CHECK_NEAR ((float) melody.notes[1].startSeconds, 0.6f, 1e-6f);
+
+    // MOVE note 0 before the start: clamped to 0.
+    CHECK (MelodyEditor::moveNote (melody, 0, -0.5, 60, 1.6));
+    CHECK_NEAR ((float) melody.notes[0].startSeconds, 0.0f, 1e-6f);
+
+    // CUT note 2 (62, 1.0-1.4 s) at 1.2 s.
+    CHECK (MelodyEditor::splitNoteAt (melody, 2, 1.2));
+    CHECK (melody.notes.size() == 4);
+    CHECK (melody.notes[2].midiNote == 62);
+    CHECK_NEAR ((float) melody.notes[2].endSeconds, 1.2f, 1e-6f);
+    CHECK (melody.notes[3].midiNote == 62);
+    CHECK_NEAR ((float) melody.notes[3].startSeconds, 1.2f, 1e-6f);
+    CHECK_NEAR ((float) melody.notes[3].endSeconds, 1.4f, 1e-6f);
+
+    // A split too close to an edge is refused (0.01 s piece).
+    CHECK (! MelodyEditor::splitNoteAt (melody, 2, 1.21));
+    CHECK (melody.notes.size() == 4);
+
+    // STRETCH note 3 (the second half, 1.2-1.4 s): right edge to 1.5 s.
+    CHECK (MelodyEditor::stretchNoteEdge (melody, 3, false, 1.5, 1.6));
+    CHECK_NEAR ((float) melody.notes[3].endSeconds, 1.5f, 1e-6f);
+    // Left edge to 1.35 s.
+    CHECK (MelodyEditor::stretchNoteEdge (melody, 3, true, 1.35, 1.6));
+    CHECK_NEAR ((float) melody.notes[3].startSeconds, 1.35f, 1e-6f);
+    // Minimum duration 0.03 s: the left edge cannot pass 1.47 s.
+    CHECK (MelodyEditor::stretchNoteEdge (melody, 3, true, 1.49, 1.6));
+    CHECK_NEAR ((float) melody.notes[3].startSeconds, 1.47f, 1e-6f);
+    // The right edge cannot pass the clip end.
+    CHECK (MelodyEditor::stretchNoteEdge (melody, 3, false, 2.0, 1.6));
+    CHECK_NEAR ((float) melody.notes[3].endSeconds, 1.6f, 1e-6f);
+
+    // Bad indices are refused.
+    CHECK (! MelodyEditor::moveNote (melody, 9, 0.0, 60, 1.6));
+    CHECK (! MelodyEditor::splitNoteAt (melody, -1, 0.5));
+    CHECK (! MelodyEditor::stretchNoteEdge (melody, 9, false, 1.0, 1.6));
+}
+
+void testMelodyEditCommitUsesEditedMelody()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+
+    // An empty edit is refused and leaves no melody.
+    MelodyNoteSequence empty;
+    CHECK (! processor.commitMelodyEdit (empty));
+    CHECK (! processor.hasMelodyNotes());
+
+    MelodyNoteSequence melody;
+    melody.durationSeconds = 1.5;
+    melody.lowestMidi = 60;
+    melody.highestMidi = 64;
+    melody.notes = {
+        { 0.25, 0.75, 60, 60.0f, 0.80f, 0.95f },
+        { 1.00, 1.40, 64, 64.0f, 0.70f, 0.90f },
+    };
+    CHECK (processor.commitMelodyEdit (melody));
+    CHECK (processor.hasMelodyNotes());
+    CHECK (processor.isPitchAnalysisEdited());
+    CHECK (processor.getStatusHint() == "MELODY EDITED - RE-ANALYZE TO RESET");
+
+    // Move the second note up to 66 and export: the file must carry
+    // the edited pitch, proving export reads the same melody the
+    // editor commits (no second melody source).
+    MelodyNoteSequence edited = melody;
+    CHECK (MelodyEditor::moveNote (edited, 1, 1.00, 66, 1.5));
+    CHECK (processor.commitMelodyEdit (edited));
+    const juce::File midiFile = getTestDir().getChildFile ("edited-melody.mid");
+    midiFile.deleteFile();
+    CHECK (processor.exportMidiToFile (midiFile));
+    CHECK (midiFile.existsAsFile());
+    juce::FileInputStream input (midiFile);
+    CHECK (input.openedOk());
+    juce::MidiFile parsed;
+    CHECK (parsed.readFrom (input));
+    int highestNoteOn = -1;
+    for (int t = 0; t < parsed.getNumTracks(); ++t)
+    {
+        const auto* track = parsed.getTrack (t);
+        if (track == nullptr)
+            continue;
+        for (int e = 0; e < track->getNumEvents(); ++e)
+        {
+            const auto message = track->getEventPointer (e)->message;
+            if (message.isNoteOn())
+                highestNoteOn = std::max (highestNoteOn, message.getNoteNumber());
+        }
+    }
+    CHECK (highestNoteOn == 66);
+    midiFile.deleteFile();
+
+    processor.releaseResources();
+}
+
+void testMelodyEditPitchShiftMovesFrames()
+{
+    // Synthetic analysis: 1.5 s of MIDI 60, 10 ms hop.
+    PitchAnalysisResult analysis;
+    analysis.durationSeconds = 1.5;
+    analysis.hopSeconds = 0.01;
+    analysis.analysisSampleRate = 24000.0;
+    for (int i = 0; i < 150; ++i)
+    {
+        PitchFrame frame;
+        frame.timeSeconds = i * 0.01;
+        frame.voiced = true;
+        frame.midiPitch = 60.0f;
+        frame.frequencyHz = 261.63f;
+        frame.confidence = 0.9f;
+        frame.rmsDb = -20.0f;
+        analysis.frames.push_back (frame);
+    }
+    analysis.voicedFrameCount = 150;
+    analysis.minMidi = 60.0f;
+    analysis.maxMidi = 60.0f;
+
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    CHECK (processor.commitPitchCurveEdit (analysis));
+    CHECK (processor.hasMelodyNotes());
+    const auto original = processor.getMelodyNotes();
+    CHECK (original != nullptr && ! original->empty());
+    const MelodyNote firstNote = original->notes.front();
+    CHECK (firstNote.midiNote == 60);
+
+    // Pitch move (+2) with an active shift: the frames at the note
+    // centre move with the note, so curve and notes stay in sync.
+    MelodyNoteSequence pitched = *original;
+    CHECK (MelodyEditor::moveNote (pitched, 0, firstNote.startSeconds,
+                                   firstNote.midiNote + 2, original->durationSeconds));
+    MelodyEditor::PitchShift shift;
+    shift.active = true;
+    shift.centreSeconds = 0.5 * (firstNote.startSeconds + firstNote.endSeconds);
+    shift.targetMidi = static_cast<float> (firstNote.midiNote + 2);
+    shift.windowSeconds = firstNote.endSeconds - firstNote.startSeconds;
+    CHECK (processor.commitMelodyEdit (pitched, shift));
+    CHECK (processor.getMelodyNotes()->notes.front().midiNote == firstNote.midiNote + 2);
+    const auto editedAnalysis = processor.getPitchAnalysis();
+    CHECK (editedAnalysis != nullptr);
+    const int centreFrame = static_cast<int> (
+        std::llround (shift.centreSeconds / editedAnalysis->hopSeconds));
+    CHECK (centreFrame >= 0
+           && centreFrame < static_cast<int> (editedAnalysis->frames.size()));
+    CHECK_NEAR (editedAnalysis->frames[static_cast<size_t> (centreFrame)].midiPitch,
+                static_cast<float> (firstNote.midiNote + 2), 0.5f);
+
+    // Time-only move (inactive shift): the frames stay where they
+    // were — the recorded audio stays where it was.
+    MelodyNoteSequence moved = *processor.getMelodyNotes();
+    const double newStart = moved.notes.front().startSeconds + 0.1;
+    CHECK (MelodyEditor::moveNote (moved, 0, newStart, moved.notes.front().midiNote,
+                                   moved.durationSeconds));
+    CHECK (processor.commitMelodyEdit (moved));
+    const auto afterMove = processor.getPitchAnalysis();
+    CHECK (afterMove != nullptr);
+    CHECK_NEAR (afterMove->frames[static_cast<size_t> (centreFrame)].midiPitch,
+                static_cast<float> (firstNote.midiNote + 2), 0.5f);
+
+    processor.releaseResources();
+}
+
+// ---- Live MIDI out (SEND TO CHANNEL) ----
+
+void testLiveMidiOutScheduling()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+
+    // Record a 0.51 s take (44 blocks of 512 samples).
+    CHECK (processor.startRecording());
+    juce::AudioBuffer<float> input (2, 512);
+    juce::MidiBuffer midi;
+    for (int b = 0; b < 44; ++b)
+    {
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < 512; ++i)
+                input.getWritePointer (ch)[i] = 0.1f;
+        processor.processBlock (input, midi);
+    }
+    processor.stopRecording();
+    CHECK (processor.hasActiveClip());
+    const double duration = processor.getPreviewDurationSeconds();
+    CHECK (duration > 0.5);
+
+    // Two-note melody: C4 0.05-0.25 s, E4 0.30-0.50 s.
+    MelodyNoteSequence melody;
+    melody.durationSeconds = duration;
+    melody.lowestMidi = 60;
+    melody.highestMidi = 64;
+    melody.notes = {
+        { 0.05, 0.25, 60, 60.0f, 0.80f, 0.95f },
+        { 0.30, 0.50, 64, 64.0f, 0.70f, 0.90f },
+    };
+
+    // Run one 512-sample block, collecting (absolute sample, message)
+    // pairs. The sample is the block index * 512 + the event offset.
+    struct MidiEvent { int sample; juce::MidiMessage message; };
+    std::vector<MidiEvent> events;
+    int blockIndex = 0;
+    auto runBlock = [&]()
+    {
+        juce::AudioBuffer<float> output (2, 512);
+        output.clear();
+        juce::MidiBuffer blockMidi;
+        processor.processBlock (output, blockMidi);
+        for (const auto metadata : blockMidi)
+            events.push_back ({ blockIndex * 512 + metadata.samplePosition,
+                                metadata.getMessage() });
+        ++blockIndex;
+    };
+    auto setParam = [&] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id); param != nullptr)
+            param->setValueNotifyingHost (value);
+    };
+    auto expectEvent = [&] (size_t index, int sample, bool isOn, int note, int channel)
+    {
+        CHECK (index < events.size());
+        if (index >= events.size())
+            return;
+        // One sample of slack: the event time is computed from the
+        // preview position in seconds, so float rounding can shift
+        // an offset by a single sample.
+        CHECK (std::abs (events[index].sample - sample) <= 1);
+        CHECK (events[index].message.isNoteOn() == isOn);
+        CHECK (events[index].message.isNoteOff() == ! isOn);
+        CHECK (events[index].message.getNoteNumber() == note);
+        CHECK (events[index].message.getChannel() == channel);
+    };
+
+    // Both switches off: preview plays, no MIDI leaves.
+    CHECK (processor.startPreview());
+    runBlock();
+    CHECK (events.empty());
+
+    // MIDI OUT on but SEND TO CHANNEL off: still nothing.
+    setParam ("midiOut", 1.0f);
+    runBlock();
+    CHECK (events.empty());
+
+    // Both on, channel 3 (choice index 2 of 16): the melody streams
+    // in time with the playhead. No melody is committed yet, so
+    // still nothing.
+    setParam ("sendToChannel", 1.0f);
+    setParam ("midiChannel", 2.0f / 15.0f);
+    CHECK (processor.getMidiChannel() == 3);
+    runBlock();
+    CHECK (events.empty());
+
+    // Commit the melody mid-playback: the stream picks it up from
+    // the current position (resync), then follows it to the end.
+    CHECK (processor.commitMelodyEdit (melody));
+    while (blockIndex < 44)
+        runBlock();
+    CHECK (events.size() == 4);
+    expectEvent (0, 2205, true, 60, 3);   // 0.05 s
+    expectEvent (1, 11025, false, 60, 3); // 0.25 s
+    expectEvent (2, 13230, true, 64, 3);  // 0.30 s
+    expectEvent (3, 22050, false, 64, 3); // 0.50 s
+    processor.stopPreview();
+
+    // Note-off hygiene on stop: restart, stop mid-note (note 60
+    // sounding), and the next block must carry its note-off.
+    events.clear();
+    blockIndex = 0;
+    CHECK (processor.startPreview());
+    while (blockIndex < 10) // 10 blocks = 0.116 s, note 60 sounding
+        runBlock();
+    CHECK (events.size() == 1);
+    expectEvent (0, 2205, true, 60, 3);
+    processor.stopPreview();
+    events.clear();
+    runBlock();
+    CHECK (events.size() == 1);
+    CHECK (events[0].message.isNoteOff());
+    CHECK (events[0].message.getNoteNumber() == 60);
+    CHECK (events[0].message.getChannel() == 3);
+
+    // Channel change mid-send: the sounding note is stopped on its
+    // old channel before the new channel takes over.
+    events.clear();
+    blockIndex = 0;
+    CHECK (processor.startPreview());
+    while (blockIndex < 10)
+        runBlock();
+    CHECK (events.size() == 1);
+    setParam ("midiChannel", 4.0f / 15.0f); // channel 5
+    CHECK (processor.getMidiChannel() == 5);
+    events.clear();
+    runBlock(); // block 10: note-off ch 3 + note-on ch 5, same offset
+    CHECK (events.size() == 2);
+    bool sawOffOld = false, sawOnNew = false;
+    for (const auto& event : events)
+    {
+        if (event.message.isNoteOff() && event.message.getNoteNumber() == 60
+            && event.message.getChannel() == 3)
+            sawOffOld = true;
+        if (event.message.isNoteOn() && event.message.getNoteNumber() == 60
+            && event.message.getChannel() == 5)
+            sawOnNew = true;
+    }
+    CHECK (sawOffOld);
+    CHECK (sawOnNew);
+    processor.stopPreview();
+
+    processor.releaseResources();
+}
+
 } // namespace
 
 int main()
@@ -1187,6 +1529,10 @@ int main()
     testAuditionSineFallback();
     testAuditionSamplePlayback();
     testCurveEditCommitAndDragFile();
+    testMelodyEditorMoveSplitStretch();
+    testMelodyEditCommitUsesEditedMelody();
+    testMelodyEditPitchShiftMovesFrames();
+    testLiveMidiOutScheduling();
     testProcessorEmptyTake();
     testProcessorTransportExclusion();
 
