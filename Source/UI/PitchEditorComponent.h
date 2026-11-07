@@ -1,1 +1,142 @@
-I3ByYWdtYSBvbmNlCgovLyBQaXRjaEVkaXRvckNvbXBvbmVudDogdGhlIGNlbnRyYWwgcGlhbm8tcm9sbCBlZGl0b3IuCi8vCi8vIERyYXduIGVudGlyZWx5IHdpdGgganVjZTo6R3JhcGhpY3MgLyBqdWNlOjpQYXRoIC0gbm8gcmFzdGVyIGltYWdlcy4KLy8KLy8gQmVmb3JlIGF1ZGlvIGlzIGxvYWRlZCAoUGhhc2UgMSBiZWhhdmlvdXIpOiBzdGF0aWMgcGxhY2Vob2xkZXIKLy8gZGF0YSAtIGEgZml4ZWQgbW9ub3Bob25pYyBtZWxvZHksIGEgc3VidGxlIGdyZXkgd2F2ZWZvcm0gYmVoaW5kCi8vIHRoZSBub3RlcyBhbmQgb25lIGdyZWVuIHBsYXloZWFkLgovLwovLyBBZnRlciBhIGNsaXAgaXMgbG9hZGVkOiB0aGUgcmVhbCB3YXZlZm9ybSBpcyBkcmF3biBmcm9tIGEgY2FjaGVkCi8vIG1pbi9tYXggcGVhayB0YWJsZS4gVGhlIHJlYWwgbW9ub3Bob25pYyBwaXRjaCBjdXJ2ZSBhbmQgc2VnbWVudGVkCi8vIE1JREktbm90ZSBibG9ja3MgYXJlIG92ZXJsYWlkLiBUaGUga2V5Ym9hcmQgaGFzIHByb2Zlc3Npb25hbCB2ZXJ0aWNhbAovLyBuYXZpZ2F0aW9uOiArLy0gem9vbSwgRklULCBhIHNjcm9sbGJhciBhbmQgbW91c2Utd2hlZWwgc2Nyb2xsaW5nLgovLwovLyBMYXlvdXQ6IHBpYW5vIGtleWJvYXJkIG9uIHRoZSBsZWZ0IChDMyBhdCB0aGUgYm90dG9tLCBDNSBhdCB0aGUKLy8gdG9wKSwgYmFyIG51bWJlcnMgMS00IGFjcm9zcyB0aGUgdG9wLCA0IGJhcnMgb2YgNCBiZWF0cyBlYWNoLgoKI2luY2x1ZGUgPEp1Y2VIZWFkZXIuaD4KCiNpbmNsdWRlIDxmdW5jdGlvbmFsPgojaW5jbHVkZSA8bWVtb3J5PgojaW5jbHVkZSA8dXRpbGl0eT4KI2luY2x1ZGUgPHZlY3Rvcj4KCiNpbmNsdWRlICIuLi9BdWRpby9BdWRpb0NsaXAuaCIKI2luY2x1ZGUgIi4uL0FuYWx5c2lzL01lbG9keU5vdGVzLmgiCiNpbmNsdWRlICIuLi9BbmFseXNpcy9QaXRjaEFuYWx5c2lzLmgiCgpjbGFzcyBQaXRjaEVkaXRvckNvbXBvbmVudCA6IHB1YmxpYyBqdWNlOjpDb21wb25lbnQsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgcHJpdmF0ZSBqdWNlOjpTY3JvbGxCYXI6Okxpc3RlbmVyCnsKcHVibGljOgogICAgUGl0Y2hFZGl0b3JDb21wb25lbnQoKTsKICAgIH5QaXRjaEVkaXRvckNvbXBvbmVudCgpIG92ZXJyaWRlOwoKICAgIC8vIEluc3RhbGwgYSBjbGlwIChtZXNzYWdlIHRocmVhZCkuIG51bGxwdHIgcmVzdG9yZXMgdGhlCiAgICAvLyBwbGFjZWhvbGRlciB2aWV3LiBUaGUgd2F2ZWZvcm0gcGVhayBjYWNoZSBpcyByZWJ1aWx0IGhlcmUsIHNvCiAgICAvLyBwYWludCgpIG5ldmVyIHNjYW5zIGF1ZGlvLgogICAgdm9pZCBzZXRDbGlwIChzdGQ6OnNoYXJlZF9wdHI8Y29uc3QgQXVkaW9DbGlwPiBjbGlwKTsKCiAgICAvLyBJbnN0YWxsL2NsZWFyIHRoZSBpbW11dGFibGUgd29ya2VyIHJlc3VsdC4gVGhlIHBpdGNoIHJhbmdlIGlzCiAgICAvLyBmaXR0ZWQgYXV0b21hdGljYWxseSB3aGlsZSBwcmVzZXJ2aW5nIHRoZSBzYW1lIHBpYW5vLXJvbGwgc3R5bGUuCiAgICB2b2lkIHNldFBpdGNoQW5hbHlzaXMgKHN0ZDo6c2hhcmVkX3B0cjxjb25zdCBQaXRjaEFuYWx5c2lzUmVzdWx0PiBhbmFseXNpcyk7CiAgICB2b2lkIHNldE5vdGVTZXF1ZW5jZSAoc3RkOjpzaGFyZWRfcHRyPGNvbnN0IE1lbG9keU5vdGVTZXF1ZW5jZT4gbm90ZXMpOwoKICAgIC8vIDAuLjEgd2hpbGUgdGhlIHdvcmtlciBpcyBhY3RpdmUsIG5lZ2F0aXZlIHdoZW4gaWRsZS4gVGhpcyBvbmx5CiAgICAvLyBjaGFuZ2VzIHRoZSBjZW50ZXJlZCBoZWxwZXIgdGV4dDsgcHJvZ3Jlc3MgYWxzbyBhcHBlYXJzIGluIHRoZQogICAgLy8gaGVhZGVyIExDRC4KICAgIHZvaWQgc2V0QW5hbHlzaXNQcm9ncmVzcyAoZmxvYXQgcHJvZ3Jlc3MpOwoKICAgIC8vIFByZXZpZXcgcGxheWhlYWQgcG9zaXRpb24gaW4gc2Vjb25kcy4gT25seSB1c2VkIHdoaWxlIGEgY2xpcAogICAgLy8gaXMgbG9hZGVkOyBuZWdhdGl2ZSB2YWx1ZXMgcmVzdG9yZSB0aGUgc3RhdGljIHBsYWNlaG9sZGVyCiAgICAvLyBwbGF5aGVhZC4gUmVwYWludHMgb25seSB3aGVuIHRoZSBwb3NpdGlvbiBhY3R1YWxseSBtb3ZlZC4KICAgIHZvaWQgc2V0UGxheWhlYWRQb3NpdGlvbiAoZG91YmxlIHNlY29uZHMpOwoKICAgIC8vIENhbGxlZCB3aGVuIHRoZSB1c2VyIGRyYWdzIHRoZSBncmVlbiBwbGF5aGVhZCAobWVzc2FnZSB0aHJlYWQpLgogICAgLy8gU2Vjb25kcyBhcmUgY2xhbXBlZCB0byB0aGUgY2xpcCByYW5nZS4gRW1wdHkgYnkgZGVmYXVsdDogdGhlCiAgICAvLyBjb21wb25lbnQgdGhlbiBvbmx5IG1vdmVzIGl0cyBvd24gZGlzcGxheWVkIHBsYXloZWFkLgogICAgc3RkOjpmdW5jdGlvbjx2b2lkIChkb3VibGUpPiBvblBsYXloZWFkU2VlazsKCiAgICAvLyBGYWxzZSB3aGlsZSByZWNvcmRpbmc6IHRoZSBwbGF5aGVhZCBjYW5ub3QgYmUgZ3JhYmJlZCB0aGVuLgogICAgLy8gVGhlIGVkaXRvciB1cGRhdGVzIHRoaXMgZnJvbSBpdHMgdGltZXIuCiAgICB2b2lkIHNldFNlZWtFbmFibGVkIChib29sIGVuYWJsZWQpIHsgc2Vla0VuYWJsZWQgPSBlbmFibGVkOyB9CgogICAgdm9pZCBwYWludCAoanVjZTo6R3JhcGhpY3MmIGcpIG92ZXJyaWRlOwogICAgdm9pZCByZXNpemVkKCkgb3ZlcnJpZGU7CiAgICB2b2lkIG1vdXNlRG93biAoY29uc3QganVjZTo6TW91c2VFdmVudCYgZXZlbnQpIG92ZXJyaWRlOwogICAgdm9pZCBtb3VzZURyYWcgKGNvbnN0IGp1Y2U6Ok1vdXNlRXZlbnQmIGV2ZW50KSBvdmVycmlkZTsKICAgIHZvaWQgbW91c2VVcCAoY29uc3QganVjZTo6TW91c2VFdmVudCYgZXZlbnQpIG92ZXJyaWRlOwogICAgdm9pZCBtb3VzZU1vdmUgKGNvbnN0IGp1Y2U6Ok1vdXNlRXZlbnQmIGV2ZW50KSBvdmVycmlkZTsKICAgIHZvaWQgbW91c2VXaGVlbE1vdmUgKGNvbnN0IGp1Y2U6Ok1vdXNlRXZlbnQmIGV2ZW50LAogICAgICAgICAgICAgICAgICAgICAgICAgY29uc3QganVjZTo6TW91c2VXaGVlbERldGFpbHMmIHdoZWVsKSBvdmVycmlkZTsKCiAgICBmbG9hdCBnZXRWZXJ0aWNhbFpvb20oKSBjb25zdCB7IHJldHVybiB2ZXJ0aWNhbFpvb207IH0KCnByaXZhdGU6CiAgICBzdHJ1Y3QgTm90ZQogICAgewogICAgICAgIGRvdWJsZSBzdGFydEJlYXQ7ICAgLy8gaW4gYmVhdHMsIDAuMCA9IHN0YXJ0IG9mIGJhciAxCiAgICAgICAgZG91YmxlIGxlbmd0aEJlYXRzOwogICAgICAgIGludCBtaWRpTm90ZTsgICAgICAgLy8gNDggPSBDMywgNjAgPSBDNCwgNzIgPSBDNQogICAgfTsKCiAgICAvLyBTdGF0aWMgcGxhY2Vob2xkZXIgbWVsb2R5OiBtb25vcGhvbmljLCBubyBvdmVybGFwcGluZyBub3Rlcy4KICAgIHN0YXRpYyBjb25zdCBOb3RlIHBsYWNlaG9sZGVyTm90ZXNbXTsKICAgIHN0YXRpYyBjb25zdGV4cHIgaW50IG51bVBsYWNlaG9sZGVyTm90ZXMgPSAxMjsKCiAgICBzdGF0aWMgY29uc3RleHByIGludCBkZWZhdWx0TG93ZXN0TWlkaSA9IDQ4OyAvLyBDMwogICAgc3RhdGljIGNvbnN0ZXhwciBpbnQgZGVmYXVsdEhpZ2hlc3RNaWRpID0gNzI7IC8vIEM1CiAgICBzdGF0aWMgY29uc3RleHByIGludCBhYnNvbHV0ZUxvd2VzdE1pZGkgPSAyNDsgLy8gQzEKICAgIHN0YXRpYyBjb25zdGV4cHIgaW50IGFic29sdXRlSGlnaGVzdE1pZGkgPSAxMDg7IC8vIEM4CiAgICBzdGF0aWMgY29uc3RleHByIGludCB0b3RhbEJlYXRzID0gMTY7IC8vIDQgYmFycyB4IDQgYmVhdHMKICAgIHN0YXRpYyBjb25zdGV4cHIgaW50IGJlYXRzUGVyQmFyID0gNDsKICAgIHN0YXRpYyBjb25zdGV4cHIgZmxvYXQga2V5Ym9hcmRXaWR0aCA9IDk0LjBmOwogICAgc3RhdGljIGNvbnN0ZXhwciBmbG9hdCBiYXJOdW1iZXJIZWlnaHQgPSAyNi4wZjsKICAgIHN0YXRpYyBjb25zdGV4cHIgZmxvYXQgc2Nyb2xsQmFyV2lkdGggPSAxMy4wZjsKCiAgICAvLyBGaXhlZC1yZXNvbHV0aW9uIHBlYWsgY2FjaGUgZm9yIHRoZSByZWFsIHdhdmVmb3JtOiBvbmUKICAgIC8vIChtaW4sIG1heCkgcGFpciBwZXIgY29sdW1uLCBjb21wdXRlZCBvbmNlIGluIHNldENsaXAoKSBmcm9tCiAgICAvLyB0aGUgY2xpcCdzIG1vbm8gYnVmZmVyIHdpdGggYSBib3VuZGVkIHN0cmlkZWQgc2Nhbi4KICAgIHN0YXRpYyBjb25zdGV4cHIgaW50IHdhdmVmb3JtQ29sdW1ucyA9IDEwMjQ7CgogICAgdm9pZCByZWJ1aWxkV2F2ZWZvcm1DYWNoZSgpOwogICAgdm9pZCBmaXRUb0NvbnRlbnQoKTsKICAgIHZvaWQgY2hhbmdlWm9vbSAoZmxvYXQgbXVsdGlwbGllcik7CiAgICB2b2lkIHVwZGF0ZVNjcm9sbEJhcigpOwogICAgdm9pZCBzZXRTY3JvbGxPZmZzZXQgKGRvdWJsZSBvZmZzZXQpOwogICAgaW50IGZpdHRlZE5vdGVDb3VudCgpIGNvbnN0OwogICAgdm9pZCBzY3JvbGxCYXJNb3ZlZCAoanVjZTo6U2Nyb2xsQmFyKiBzY3JvbGxCYXJUaGF0SGFzTW92ZWQsCiAgICAgICAgICAgICAgICAgICAgICAgICBkb3VibGUgbmV3UmFuZ2VTdGFydCkgb3ZlcnJpZGU7CgogICAgLy8gUGxheWhlYWQgZHJhZyBnZW9tZXRyeSAoc2FtZSBjb25zdGFudHMgYXMgcGFpbnQoKSwgc28gdGhlCiAgICAvLyBncmFiYmVkIGxpbmUgYW5kIHRoZSBkcmF3biBsaW5lIGFsd2F5cyBhZ3JlZSkuCiAgICBmbG9hdCBwbGF5aGVhZFhGb3JTZWNvbmRzIChkb3VibGUgc2Vjb25kcykgY29uc3Q7CiAgICBkb3VibGUgc2Vjb25kc0ZvclggKGZsb2F0IHgpIGNvbnN0OyAvLyAtMSB3aGVuIG5vIGNsaXAgaXMgbG9hZGVkCiAgICBib29sIGlzTmVhclBsYXloZWFkIChmbG9hdCB4KSBjb25zdDsKCiAgICBib29sIGlzQmxhY2tLZXkgKGludCBtaWRpTm90ZSkgY29uc3Q7CiAgICBqdWNlOjpTdHJpbmcgbm90ZU5hbWUgKGludCBtaWRpTm90ZSkgY29uc3Q7CiAgICBzdGQ6OnBhaXI8aW50LCBpbnQ+IHZpc2libGVNaWRpUmFuZ2UoKSBjb25zdDsKCiAgICBzdGQ6OnNoYXJlZF9wdHI8Y29uc3QgQXVkaW9DbGlwPiBhY3RpdmVDbGlwOwogICAgc3RkOjpzaGFyZWRfcHRyPGNvbnN0IFBpdGNoQW5hbHlzaXNSZXN1bHQ+IHBpdGNoQW5hbHlzaXM7CiAgICBzdGQ6OnNoYXJlZF9wdHI8Y29uc3QgTWVsb2R5Tm90ZVNlcXVlbmNlPiBub3RlU2VxdWVuY2U7CiAgICBzdGQ6OnZlY3RvcjxzdGQ6OnBhaXI8ZmxvYXQsIGZsb2F0Pj4gd2F2ZWZvcm1QZWFrczsKICAgIGRvdWJsZSBwbGF5aGVhZFNlY29uZHMgPSAtMS4wOwogICAgZmxvYXQgYW5hbHlzaXNQcm9ncmVzcyA9IC0xLjBmOwogICAgYm9vbCBzZWVrRW5hYmxlZCA9IHRydWU7CiAgICBib29sIGRyYWdnaW5nUGxheWhlYWQgPSBmYWxzZTsKCiAgICBqdWNlOjpUZXh0QnV0dG9uIHpvb21PdXRCdXR0b24geyAiLSIgfTsKICAgIGp1Y2U6OlRleHRCdXR0b24gZml0QnV0dG9uIHsgIkZJVCIgfTsKICAgIGp1Y2U6OlRleHRCdXR0b24gem9vbUluQnV0dG9uIHsgIisiIH07CiAgICBqdWNlOjpTY3JvbGxCYXIgdmVydGljYWxTY3JvbGxCYXIgeyB0cnVlIH07CiAgICBmbG9hdCB2ZXJ0aWNhbFpvb20gPSAxLjBmOwogICAgaW50IGZpdHRlZExvd2VzdE1pZGkgPSBkZWZhdWx0TG93ZXN0TWlkaTsKICAgIGludCBmaXR0ZWRIaWdoZXN0TWlkaSA9IGRlZmF1bHRIaWdoZXN0TWlkaTsKICAgIGludCB2aXNpYmxlTG93ZXN0TWlkaSA9IGRlZmF1bHRMb3dlc3RNaWRpOwogICAgaW50IHZpc2libGVIaWdoZXN0TWlkaSA9IGRlZmF1bHRIaWdoZXN0TWlkaTsKICAgIGJvb2wgdXBkYXRpbmdTY3JvbGxCYXIgPSBmYWxzZTsKfTsK
+#pragma once
+
+// PitchEditorComponent: the central piano-roll editor.
+//
+// Drawn entirely with juce::Graphics / juce::Path - no raster images.
+//
+// Before audio is loaded (Phase 1 behaviour): static placeholder
+// data - a fixed monophonic melody, a subtle grey waveform behind
+// the notes and one green playhead.
+//
+// After a clip is loaded: the real waveform is drawn from a cached
+// min/max peak table. The real monophonic pitch curve and segmented
+// MIDI-note blocks are overlaid. The keyboard has professional vertical
+// navigation: +/- zoom, FIT, a scrollbar and mouse-wheel scrolling.
+//
+// Layout: piano keyboard on the left (C3 at the bottom, C5 at the
+// top), bar numbers 1-4 across the top, 4 bars of 4 beats each.
+
+#include <JuceHeader.h>
+
+#include <functional>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "../Audio/AudioClip.h"
+#include "../Analysis/MelodyNotes.h"
+#include "../Analysis/PitchAnalysis.h"
+
+class PitchEditorComponent : public juce::Component,
+                             private juce::ScrollBar::Listener
+{
+public:
+    PitchEditorComponent();
+    ~PitchEditorComponent() override;
+
+    // Install a clip (message thread). nullptr restores the
+    // placeholder view. The waveform peak cache is rebuilt here, so
+    // paint() never scans audio.
+    void setClip (std::shared_ptr<const AudioClip> clip);
+
+    // Install/clear the immutable worker result. The pitch range is
+    // fitted automatically while preserving the same piano-roll style.
+    void setPitchAnalysis (std::shared_ptr<const PitchAnalysisResult> analysis);
+    void setNoteSequence (std::shared_ptr<const MelodyNoteSequence> notes);
+
+    // 0..1 while the worker is active, negative when idle. This only
+    // changes the centered helper text; progress also appears in the
+    // header LCD.
+    void setAnalysisProgress (float progress);
+
+    // Preview playhead position in seconds. Only used while a clip
+    // is loaded; negative values restore the static placeholder
+    // playhead. Repaints only when the position actually moved.
+    void setPlayheadPosition (double seconds);
+
+    // Called when the user drags the green playhead (message thread).
+    // Seconds are clamped to the clip range. Empty by default: the
+    // component then only moves its own displayed playhead.
+    std::function<void (double)> onPlayheadSeek;
+
+    // False while recording: the playhead cannot be grabbed then.
+    // The editor updates this from its timer.
+    void setSeekEnabled (bool enabled) { seekEnabled = enabled; }
+
+    void paint (juce::Graphics& g) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent& event) override;
+    void mouseDrag (const juce::MouseEvent& event) override;
+    void mouseUp (const juce::MouseEvent& event) override;
+    void mouseMove (const juce::MouseEvent& event) override;
+    void mouseWheelMove (const juce::MouseEvent& event,
+                         const juce::MouseWheelDetails& wheel) override;
+
+    float getVerticalZoom() const { return verticalZoom; }
+
+private:
+    struct Note
+    {
+        double startBeat;   // in beats, 0.0 = start of bar 1
+        double lengthBeats;
+        int midiNote;       // 48 = C3, 60 = C4, 72 = C5
+    };
+
+    // Static placeholder melody: monophonic, no overlapping notes.
+    static const Note placeholderNotes[];
+    static constexpr int numPlaceholderNotes = 12;
+
+    static constexpr int defaultLowestMidi = 48; // C3
+    static constexpr int defaultHighestMidi = 72; // C5
+    static constexpr int absoluteLowestMidi = 24; // C1
+    static constexpr int absoluteHighestMidi = 108; // C8
+    static constexpr int totalBeats = 16; // 4 bars x 4 beats
+    static constexpr int beatsPerBar = 4;
+    static constexpr float keyboardWidth = 94.0f;
+    static constexpr float barNumberHeight = 26.0f;
+    static constexpr float scrollBarWidth = 13.0f;
+
+    // Fixed-resolution peak cache for the real waveform: one
+    // (min, max) pair per column, computed once in setClip() from
+    // the clip's mono buffer with a bounded strided scan.
+    static constexpr int waveformColumns = 1024;
+
+    void rebuildWaveformCache();
+    void fitToContent();
+    void changeZoom (float multiplier);
+    void updateScrollBar();
+    void setScrollOffset (double offset);
+    int fittedNoteCount() const;
+    void scrollBarMoved (juce::ScrollBar* scrollBarThatHasMoved,
+                         double newRangeStart) override;
+
+    // Playhead drag geometry (same constants as paint(), so the
+    // grabbed line and the drawn line always agree).
+    float playheadXForSeconds (double seconds) const;
+    double secondsForX (float x) const; // -1 when no clip is loaded
+    bool isNearPlayhead (float x) const;
+
+    bool isBlackKey (int midiNote) const;
+    juce::String noteName (int midiNote) const;
+    std::pair<int, int> visibleMidiRange() const;
+
+    std::shared_ptr<const AudioClip> activeClip;
+    std::shared_ptr<const PitchAnalysisResult> pitchAnalysis;
+    std::shared_ptr<const MelodyNoteSequence> noteSequence;
+    std::vector<std::pair<float, float>> waveformPeaks;
+    double playheadSeconds = -1.0;
+    float analysisProgress = -1.0f;
+    bool seekEnabled = true;
+    bool draggingPlayhead = false;
+
+    juce::TextButton zoomOutButton { "-" };
+    juce::TextButton fitButton { "FIT" };
+    juce::TextButton zoomInButton { "+" };
+    juce::ScrollBar verticalScrollBar { true };
+    float verticalZoom = 1.0f;
+    int fittedLowestMidi = defaultLowestMidi;
+    int fittedHighestMidi = defaultHighestMidi;
+    int visibleLowestMidi = defaultLowestMidi;
+    int visibleHighestMidi = defaultHighestMidi;
+    bool updatingScrollBar = false;
+};
