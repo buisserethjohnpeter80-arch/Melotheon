@@ -5,8 +5,8 @@
 // It runs on a worker thread, never in processBlock(). The input is
 // resampled to 24 kHz, high-pass filtered, and inspected every 10 ms
 // with two YIN resolutions: an 85 ms low-frequency window and a 21 ms
-// high-frequency window. The result is a pitch curve only. Note
-// segmentation and MIDI generation deliberately remain Phase 3B/3D.
+// high-frequency window. This class produces the continuous pitch curve;
+// NoteSegmenter converts that result into the MIDI/sample-renderer notes.
 
 #include <juce_audio_basics/juce_audio_basics.h>
 

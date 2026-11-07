@@ -1,6 +1,6 @@
 #pragma once
 
-// MelotheonAudioProcessor - the VST3 audio processor (Phase 3A).
+// MelotheonAudioProcessor - the VST3 audio processor (Phase 3B/3C).
 //
 // The Phase 2 AUDIO FOUNDATION provides:
 //   * Live capture: host audio from the FL Studio Mixer Track is
@@ -13,10 +13,10 @@
 //   * Status: READY / LOADING / RECORDING / AUDIO READY / PLAYING /
 //     STOPPED / NO INPUT / ERROR / LIMIT REACHED / EMPTY SOURCE.
 //
-// Phase 3A adds offline monophonic pitch detection on a worker thread.
-// ANALYZE publishes a 10 ms pitch/confidence curve to the editor.
-// What is still NOT here: note segmentation, MIDI generation,
-// instrument playback, voice multiplication, choir generation, AI.
+// Phase 3 adds offline monophonic pitch detection, stable note
+// segmentation, standard MIDI-file export and sample-instrument preview.
+// Instrument rendering also runs on a worker thread. Voice multiplication,
+// choir generation, AI and third-party instrument hosting remain later work.
 //
 // Thread safety: processBlock() never allocates, never locks, never
 // touches files or the UI, and never changes shared_ptr ownership. The
@@ -38,6 +38,8 @@
 #include "Audio/AudioCaptureEngine.h"
 #include "Audio/AudioFileLoader.h"
 #include "Audio/AudioPreviewEngine.h"
+#include "Audio/SampleRenderEngine.h"
+#include "Analysis/MelodyNotes.h"
 #include "Analysis/PitchAnalysisEngine.h"
 
 class MelotheonAudioProcessor : public juce::AudioProcessor
@@ -57,7 +59,13 @@ public:
         EmptySource,
         Analyzing,
         AnalysisReady,
-        NoPitch
+        NoPitch,
+        LoadingSound,
+        SoundReady,
+        RenderingInstrument,
+        InstrumentReady,
+        PlayingInstrument,
+        MidiExported
     };
 
     enum class InputSource
@@ -95,7 +103,7 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // ---- Audio + Phase 3A public API (editor + tests) ----
+    // ---- Audio + Phase 3 public API (editor + tests) ----
 
     InputSource getInputSource() const;
 
@@ -152,8 +160,18 @@ public:
     bool isPreviewPlaying() const { return previewEngine.isPlaying(); }
     // True once after playback reached the end of the clip.
     bool consumePlaybackEnded() { return previewEngine.consumePlaybackEnded(); }
+    bool consumeInstrumentPlaybackEnded()
+    {
+        return instrumentPreviewEngine.consumePlaybackEnded();
+    }
     double getPreviewPositionSeconds() const { return previewEngine.getPositionSeconds(); }
     double getPreviewDurationSeconds() const { return previewEngine.getDurationSeconds(); }
+    double getDisplayPreviewPositionSeconds() const
+    {
+        return instrumentPreviewEngine.isPlaying()
+            ? instrumentPreviewEngine.getPositionSeconds()
+            : previewEngine.getPositionSeconds();
+    }
 
     // Import a file (message thread): sets LOADING and decodes on a
     // worker thread; the result installs the clip or sets ERROR.
@@ -180,9 +198,57 @@ public:
         return pitchAnalysisVersion.load (std::memory_order_acquire);
     }
 
+    // Discrete note events are created automatically when pitch analysis
+    // completes. They feed both MIDI export and the sample renderer.
+    std::shared_ptr<const MelodyNoteSequence> getMelodyNotes() const
+    {
+        return melodyNotes;
+    }
+    int getMelodyNotesVersion() const
+    {
+        return melodyNotesVersion.load (std::memory_order_acquire);
+    }
+    bool hasMelodyNotes() const
+    {
+        return melodyNotes != nullptr && ! melodyNotes->empty();
+    }
+
+    // Load a local one-shot instrument sample. Decoding, root-note
+    // detection and rendering are asynchronous. The loaded sound is kept
+    // when the melody is re-analysed and is rendered again for new notes.
+    void startInstrumentFileImport (const juce::File& file);
+    bool hasInstrumentSample() const
+    {
+        return instrumentSample != nullptr && ! instrumentSample->isEmpty();
+    }
+    bool hasRenderedInstrument() const
+    {
+        return renderedInstrumentClip != nullptr && ! renderedInstrumentClip->isEmpty();
+    }
+    juce::String getInstrumentDisplayText() const { return instrumentDisplayText; }
+    int getInstrumentVersion() const
+    {
+        return instrumentVersion.load (std::memory_order_acquire);
+    }
+    bool isInstrumentRendering() const { return sampleRenderEngine.isRunning(); }
+    float getInstrumentRenderProgress() const { return sampleRenderEngine.getProgress(); }
+
+    bool startInstrumentPreview();
+    void stopInstrumentPreview();
+    void pauseInstrumentPreview();
+    bool isInstrumentPreviewPlaying() const
+    {
+        return instrumentPreviewEngine.isPlaying();
+    }
+
+    // Write the segmented notes as a standard .mid file. Timing follows
+    // the current host BPM when available, otherwise 120 BPM.
+    bool exportMidiToFile (const juce::File& target);
+
     // Keep the PLAY ORIGINAL toggle parameter in sync with preview
     // state. Message thread only.
     void setPlayOriginalParameter (bool shouldPlay);
+    void setPlayInstrumentParameter (bool shouldPlay);
 
     // Interface parameters (editor state; persisted in the host).
     juce::AudioProcessorValueTreeState apvts;
@@ -197,6 +263,11 @@ private:
     // previous clip. Message thread only.
     void clearPitchAnalysis();
 
+    // Start/restart the offline sample render once both a sound and note
+    // sequence are available. Message thread only.
+    void startInstrumentRender();
+    void clearRenderedInstrument();
+
     // Stop capture, wait for the last audio-thread copy and publish a
     // non-empty take. Returns false for no active take or zero samples.
     bool finalizeCapture (Status statusAfter);
@@ -208,13 +279,21 @@ private:
     AudioCaptureEngine captureEngine;
     AudioPreviewEngine previewEngine;
     AudioFileLoader fileLoader;
+    AudioFileLoader instrumentFileLoader;
     PitchAnalysisEngine pitchAnalysisEngine;
+    SampleRenderEngine sampleRenderEngine;
+    AudioPreviewEngine instrumentPreviewEngine;
 
     std::shared_ptr<const AudioClip> activeClip; // message-thread owner
     std::shared_ptr<const PitchAnalysisResult> pitchAnalysis; // message-thread owner
+    std::shared_ptr<const MelodyNoteSequence> melodyNotes; // message-thread owner
+    std::shared_ptr<const AudioClip> instrumentSample; // loaded one-shot
+    std::shared_ptr<const AudioClip> renderedInstrumentClip;
     std::atomic<int> status { static_cast<int> (Status::Ready) };
     std::atomic<int> clipVersion { 0 };
     std::atomic<int> pitchAnalysisVersion { 0 };
+    std::atomic<int> melodyNotesVersion { 0 };
+    std::atomic<int> instrumentVersion { 0 };
     std::atomic<float> inputPeakDb { -60.0f };
     std::atomic<float> inputRmsDb { -60.0f };
     std::atomic<double> hostSampleRate { 44100.0 };
@@ -226,6 +305,8 @@ private:
 
     // Message thread only: short error text for the Error status.
     juce::String lastErrorMessage;
+    juce::String instrumentDisplayText { "NO SOUND LOADED" };
+    juce::String instrumentBaseName;
 
     // Audio-thread-only meter state (written in processBlock only,
     // reset in prepareToPlay while the callback is suspended).

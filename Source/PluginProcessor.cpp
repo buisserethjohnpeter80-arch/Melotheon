@@ -1,12 +1,26 @@
-// MelotheonAudioProcessor implementation (Phase 3A).
-// The Phase 2 audio foundation remains real-time safe. Monophonic
-// pitch analysis is offline on a worker thread; MIDI and instrument
-// playback are not part of this phase.
+// MelotheonAudioProcessor implementation (Phase 3B/3C).
+// The Phase 2 audio foundation remains real-time safe. Pitch analysis
+// and sample-instrument rendering run on workers; MIDI export runs only
+// from an explicit message-thread button action.
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Analysis/NoteSegmenter.h"
+#include "Midi/MidiExporter.h"
 
 #include <cmath>
+
+namespace
+{
+juce::String midiNoteName (int midiNote)
+{
+    static const char* names[] = {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
+    midiNote = juce::jlimit (0, 127, midiNote);
+    return juce::String (names[midiNote % 12]) + juce::String (midiNote / 12 - 1);
+}
+} // namespace
 
 MelotheonAudioProcessor::MelotheonAudioProcessor()
     : AudioProcessor (BusesProperties()
@@ -20,6 +34,7 @@ MelotheonAudioProcessor::~MelotheonAudioProcessor()
 {
     aliveFlag->store (false, std::memory_order_release);
     pitchAnalysisEngine.cancel();
+    sampleRenderEngine.cancel();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout
@@ -44,7 +59,7 @@ MelotheonAudioProcessor::createParameterLayout()
         juce::ParameterID { "quantize", 1 }, "Quantize",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.8f));
 
-    // Left capture panel: noise gate knob + mono toggle. Phase 3A uses
+    // Left capture panel: noise gate knob + mono toggle. Pitch analysis uses
     // the gate as the offline pitch detector's silence threshold; it
     // never gates or modifies the preview audio.
     layout.add (std::make_unique<juce::AudioParameterFloat>(
@@ -109,6 +124,7 @@ void MelotheonAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     const int numChannels = juce::jlimit (1, 2, getTotalNumInputChannels());
     captureEngine.prepare (hostSampleRate.load (std::memory_order_acquire), numChannels);
     previewEngine.stop();
+    instrumentPreviewEngine.stop();
 
     meterPeakLinear = 0.0f;
     meterRmsLinear = 0.0f;
@@ -123,6 +139,7 @@ void MelotheonAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
 void MelotheonAudioProcessor::releaseResources()
 {
     previewEngine.stop();
+    instrumentPreviewEngine.stop();
     captureEngine.stopRecording(); // discard any unfinalized take
 }
 
@@ -152,16 +169,20 @@ void MelotheonAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (captureEngine.limitReached())
         setStatus (Status::LimitReached);
 
-    // 3. Original-audio preview replaces the pass-through while it
-    // plays; otherwise the Mixer Track input flows through unchanged.
-    if (previewEngine.isPlaying())
+    // 3. One preview owns the output at a time. Instrument playback has
+    // priority only while explicitly active; otherwise original preview or
+    // normal Mixer Track pass-through remains unchanged.
+    if (instrumentPreviewEngine.isPlaying())
+        instrumentPreviewEngine.render (
+            buffer, hostSampleRate.load (std::memory_order_acquire));
+    else if (previewEngine.isPlaying())
         previewEngine.render (buffer, hostSampleRate.load (std::memory_order_acquire));
 
     // 4. READY <-> NO INPUT transitions (only from those states).
     updateSilenceStatus (buffer.getNumSamples());
 }
 
-// ---- Audio + Phase 3A public API ----
+// ---- Audio + melody public API ----
 
 MelotheonAudioProcessor::InputSource MelotheonAudioProcessor::getInputSource() const
 {
@@ -188,6 +209,14 @@ juce::String MelotheonAudioProcessor::getStatusText() const
                 pitchAnalysisEngine.getProgress() * 100.0f)) + "%";
         case Status::AnalysisReady: return "PITCH READY";
         case Status::NoPitch:       return "NO STABLE PITCH";
+        case Status::LoadingSound:  return "LOADING SOUND";
+        case Status::SoundReady:    return "SOUND READY";
+        case Status::RenderingInstrument:
+            return "RENDERING " + juce::String (juce::roundToInt (
+                sampleRenderEngine.getProgress() * 100.0f)) + "%";
+        case Status::InstrumentReady:   return "INSTRUMENT READY";
+        case Status::PlayingInstrument:return "PLAYING INSTRUMENT";
+        case Status::MidiExported:      return "MIDI EXPORTED";
     }
     return "READY";
 }
@@ -205,7 +234,9 @@ bool MelotheonAudioProcessor::startRecording()
     // import and stop preview before arming capture.
     fileLoader.cancelPendingLoad();
     previewEngine.stop();
+    instrumentPreviewEngine.stop();
     setPlayOriginalParameter (false);
+    setPlayInstrumentParameter (false);
     clearPitchAnalysis();
 
     if (! captureEngine.startRecording())
@@ -246,6 +277,8 @@ bool MelotheonAudioProcessor::startPreview()
     // Do not let an older asynchronous import replace the clip while
     // the user is previewing it.
     fileLoader.cancelPendingLoad();
+    instrumentPreviewEngine.stop();
+    setPlayInstrumentParameter (false);
 
     if (! hasActiveClip())
     {
@@ -265,6 +298,9 @@ bool MelotheonAudioProcessor::startPreview()
 void MelotheonAudioProcessor::stopPreview()
 {
     previewEngine.stop();
+    instrumentPreviewEngine.stop();
+    setPlayOriginalParameter (false);
+    setPlayInstrumentParameter (false);
     setStatus (Status::Stopped);
 }
 
@@ -288,7 +324,9 @@ void MelotheonAudioProcessor::startFileImport (const juce::File& file)
     if (captureEngine.isRecording() || captureEngine.limitReached())
         finalizeCapture (Status::AudioReady);
     previewEngine.stop();
+    instrumentPreviewEngine.stop();
     setPlayOriginalParameter (false);
+    setPlayInstrumentParameter (false);
     clearPitchAnalysis();
 
     setStatus (Status::Loading);
@@ -329,7 +367,9 @@ bool MelotheonAudioProcessor::startPitchAnalysis()
 
     fileLoader.cancelPendingLoad();
     previewEngine.stop();
+    instrumentPreviewEngine.stop();
     setPlayOriginalParameter (false);
+    setPlayInstrumentParameter (false);
     clearPitchAnalysis();
 
     PitchAnalysisSettings settings;
@@ -353,8 +393,36 @@ bool MelotheonAudioProcessor::startPitchAnalysis()
 
             pitchAnalysis = std::move (result);
             pitchAnalysisVersion.fetch_add (1, std::memory_order_acq_rel);
-            setStatus (pitchAnalysis->hasPitch() ? Status::AnalysisReady
-                                                 : Status::NoPitch);
+
+            if (pitchAnalysis->hasPitch())
+            {
+                NoteSegmentationSettings noteSettings;
+                const float transition = apvts.getRawParameterValue ("transition")->load();
+                const float variation = apvts.getRawParameterValue ("variation")->load();
+                noteSettings.minimumNoteSeconds = juce::jmap (
+                    juce::jlimit (0.0f, 1.0f, transition), 0.035, 0.120);
+                noteSettings.pitchHysteresisSemitones = juce::jmap (
+                    juce::jlimit (0.0f, 1.0f, variation), 0.58f, 0.92f);
+                melodyNotes = NoteSegmenter::segment (*pitchAnalysis, noteSettings);
+                melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
+
+                if (hasMelodyNotes())
+                {
+                    setStatus (Status::AnalysisReady);
+                    if (hasInstrumentSample())
+                        startInstrumentRender();
+                }
+                else
+                {
+                    setStatus (Status::NoPitch);
+                }
+            }
+            else
+            {
+                melodyNotes = std::make_shared<MelodyNoteSequence>();
+                melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
+                setStatus (Status::NoPitch);
+            }
         },
         alive);
     return true;
@@ -371,6 +439,211 @@ void MelotheonAudioProcessor::setPlayOriginalParameter (bool shouldPlay)
 {
     if (auto* param = apvts.getParameter ("playOriginal"); param != nullptr)
         param->setValueNotifyingHost (shouldPlay ? 1.0f : 0.0f);
+}
+
+void MelotheonAudioProcessor::setPlayInstrumentParameter (bool shouldPlay)
+{
+    if (auto* param = apvts.getParameter ("playInstrument"); param != nullptr)
+        param->setValueNotifyingHost (shouldPlay ? 1.0f : 0.0f);
+}
+
+void MelotheonAudioProcessor::startInstrumentFileImport (const juce::File& file)
+{
+    if (! file.existsAsFile())
+    {
+        lastErrorMessage = "SOUND FILE NOT FOUND";
+        setStatus (Status::Error);
+        return;
+    }
+
+    instrumentPreviewEngine.stop();
+    setPlayInstrumentParameter (false);
+    sampleRenderEngine.cancel();
+    clearRenderedInstrument();
+    instrumentSample.reset();
+    instrumentBaseName.clear();
+    instrumentDisplayText = "LOADING SOUND";
+    instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
+    setStatus (Status::LoadingSound);
+
+    auto alive = aliveFlag;
+    instrumentFileLoader.loadFileAsync (
+        file,
+        [this, alive, selectedName = file.getFileNameWithoutExtension()]
+        (AudioFileLoader::Result loadResult)
+        {
+            if (! alive->load (std::memory_order_acquire))
+                return;
+
+            if (! loadResult.succeeded())
+            {
+                lastErrorMessage = loadResult.errorMessage;
+                instrumentDisplayText = "NO SOUND LOADED";
+                instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
+                setStatus (Status::Error);
+                return;
+            }
+            if (loadResult.clip->durationSeconds > 15.0)
+            {
+                lastErrorMessage = "USE A SHORT ONE-SHOT";
+                instrumentDisplayText = "NO SOUND LOADED";
+                instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
+                setStatus (Status::Error);
+                return;
+            }
+
+            instrumentSample = std::move (loadResult.clip);
+            instrumentBaseName = selectedName.substring (0, 22).toUpperCase();
+            instrumentDisplayText = instrumentBaseName
+                                  + (hasMelodyNotes() ? " / RENDERING"
+                                                     : " / ANALYZE FIRST");
+            instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
+
+            if (hasMelodyNotes())
+                startInstrumentRender();
+            else
+                setStatus (Status::SoundReady);
+        },
+        alive);
+}
+
+void MelotheonAudioProcessor::startInstrumentRender()
+{
+    if (! hasInstrumentSample())
+    {
+        lastErrorMessage = "LOAD SOUND FIRST";
+        setStatus (Status::Error);
+        return;
+    }
+    if (! hasMelodyNotes())
+    {
+        lastErrorMessage = "ANALYZE FIRST";
+        setStatus (Status::Error);
+        return;
+    }
+
+    instrumentPreviewEngine.stop();
+    setPlayInstrumentParameter (false);
+    clearRenderedInstrument();
+    instrumentDisplayText = instrumentBaseName + " / RENDERING";
+    instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
+    setStatus (Status::RenderingInstrument);
+
+    auto alive = aliveFlag;
+    sampleRenderEngine.start (
+        instrumentSample, melodyNotes,
+        hostSampleRate.load (std::memory_order_acquire),
+        [this, alive] (SampleRenderResult result)
+        {
+            if (! alive->load (std::memory_order_acquire))
+                return;
+
+            if (! result.succeeded())
+            {
+                lastErrorMessage = result.errorMessage.isNotEmpty()
+                    ? result.errorMessage : "INSTRUMENT RENDER ERROR";
+                instrumentDisplayText = instrumentBaseName + " / ERROR";
+                instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
+                setStatus (Status::Error);
+                return;
+            }
+
+            renderedInstrumentClip = std::move (result.renderedClip);
+            instrumentPreviewEngine.setClip (renderedInstrumentClip);
+            instrumentDisplayText = instrumentBaseName + "  ROOT "
+                                  + midiNoteName (result.rootMidi);
+            instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
+            setStatus (Status::InstrumentReady);
+        },
+        alive);
+}
+
+void MelotheonAudioProcessor::clearRenderedInstrument()
+{
+    instrumentPreviewEngine.stop();
+    instrumentPreviewEngine.setClip (nullptr);
+    setPlayInstrumentParameter (false);
+    if (renderedInstrumentClip != nullptr)
+    {
+        renderedInstrumentClip.reset();
+        instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
+    }
+}
+
+bool MelotheonAudioProcessor::startInstrumentPreview()
+{
+    if (sampleRenderEngine.isRunning())
+        return false;
+    if (! hasInstrumentSample())
+    {
+        lastErrorMessage = "LOAD SOUND FIRST";
+        setStatus (Status::Error);
+        return false;
+    }
+    if (! hasMelodyNotes())
+    {
+        lastErrorMessage = "ANALYZE FIRST";
+        setStatus (Status::Error);
+        return false;
+    }
+    if (! hasRenderedInstrument())
+    {
+        startInstrumentRender();
+        return false;
+    }
+
+    previewEngine.stop();
+    setPlayOriginalParameter (false);
+    if (! instrumentPreviewEngine.start())
+        return false;
+
+    setStatus (Status::PlayingInstrument);
+    return true;
+}
+
+void MelotheonAudioProcessor::stopInstrumentPreview()
+{
+    instrumentPreviewEngine.stop();
+    setPlayInstrumentParameter (false);
+    setStatus (Status::Stopped);
+}
+
+void MelotheonAudioProcessor::pauseInstrumentPreview()
+{
+    instrumentPreviewEngine.pause();
+    setPlayInstrumentParameter (false);
+    setStatus (Status::Stopped);
+}
+
+bool MelotheonAudioProcessor::exportMidiToFile (const juce::File& target)
+{
+    if (! hasMelodyNotes())
+    {
+        lastErrorMessage = "ANALYZE FIRST";
+        setStatus (Status::Error);
+        return false;
+    }
+
+    MidiExportSettings settings;
+    settings.channel = juce::jlimit (1, 16, 1 + static_cast<int> (
+        apvts.getRawParameterValue ("midiChannel")->load()));
+    if (auto* playHead = getPlayHead(); playHead != nullptr)
+    {
+        if (const auto position = playHead->getPosition(); position.has_value())
+            if (const auto bpm = position->getBpm(); bpm.has_value())
+                settings.bpm = *bpm;
+    }
+
+    juce::String error;
+    if (! MidiExporter::writeToFile (*melodyNotes, target, settings, error))
+    {
+        lastErrorMessage = error.isNotEmpty() ? error : "MIDI WRITE ERROR";
+        setStatus (Status::Error);
+        return false;
+    }
+
+    setStatus (Status::MidiExported);
+    return true;
 }
 
 void MelotheonAudioProcessor::installClip (std::shared_ptr<const AudioClip> clip,
@@ -392,10 +665,22 @@ void MelotheonAudioProcessor::installClip (std::shared_ptr<const AudioClip> clip
 void MelotheonAudioProcessor::clearPitchAnalysis()
 {
     pitchAnalysisEngine.cancel();
+    sampleRenderEngine.cancel();
+    clearRenderedInstrument();
     if (pitchAnalysis != nullptr)
     {
         pitchAnalysis.reset();
         pitchAnalysisVersion.fetch_add (1, std::memory_order_acq_rel);
+    }
+    if (melodyNotes != nullptr)
+    {
+        melodyNotes.reset();
+        melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
+    }
+    if (hasInstrumentSample())
+    {
+        instrumentDisplayText = instrumentBaseName + " / ANALYZE FIRST";
+        instrumentVersion.fetch_add (1, std::memory_order_acq_rel);
     }
 }
 

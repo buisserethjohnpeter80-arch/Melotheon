@@ -11,10 +11,10 @@
 #   cmake --build build --config Release
 # The .vst3 bundle lands under build/Melotheon_artefacts/Release/VST3/.
 #
-# Phase 3A scope: the Phase 2 audio foundation plus offline monophonic
-# pitch tracking and a real pitch curve. Note segmentation, MIDI
-# generation and instrument hosting remain later phases (see README.md).
-# The processor passes audio through unchanged while preview is inactive.
+# Phase 3C scope: audio foundation, offline monophonic pitch tracking,
+# stable note segmentation, standard MIDI export and local one-shot
+# instrument rendering. The processor passes audio through unchanged while
+# preview is inactive.
 
 cmake_minimum_required(VERSION 3.22)
 
@@ -65,8 +65,12 @@ target_sources(Melotheon
         Source/Audio/AudioCaptureEngine.cpp
         Source/Audio/AudioFileLoader.cpp
         Source/Audio/AudioPreviewEngine.cpp
+        Source/Audio/SampleInstrumentRenderer.cpp
+        Source/Audio/SampleRenderEngine.cpp
         Source/Analysis/MonophonicPitchAnalyzer.cpp
+        Source/Analysis/NoteSegmenter.cpp
         Source/Analysis/PitchAnalysisEngine.cpp
+        Source/Midi/MidiExporter.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp
@@ -106,7 +110,7 @@ target_link_libraries(Melotheon
         juce::juce_recommended_warning_flags
 )
 
-# ---- Phase 3A unit tests (console app, no GUI, no host) ----
+# ---- Phase 3C unit tests (console app, no GUI, no host) ----
 # Covers the audio foundation: adaptive stereo-to-mono conversion, mono copy,
 # capture limits / state transitions, preview state transitions and
 # resampling, file-loader rejection + valid WAV round-trip, AudioClip
@@ -131,8 +135,12 @@ target_sources(MelotheonTests
         Source/Audio/AudioCaptureEngine.cpp
         Source/Audio/AudioFileLoader.cpp
         Source/Audio/AudioPreviewEngine.cpp
+        Source/Audio/SampleInstrumentRenderer.cpp
+        Source/Audio/SampleRenderEngine.cpp
         Source/Analysis/MonophonicPitchAnalyzer.cpp
+        Source/Analysis/NoteSegmenter.cpp
         Source/Analysis/PitchAnalysisEngine.cpp
+        Source/Midi/MidiExporter.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp

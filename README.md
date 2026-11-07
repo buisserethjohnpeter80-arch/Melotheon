@@ -65,7 +65,7 @@ Phase 2.1 also hardens the working foundation:
 - Closing the editor while the file chooser is open is safe.
 - A pending import cannot replace a clip after Record or Play takes over.
 
-## Phase 3A — monophonic pitch map (current)
+## Phase 3C — melody notes, MIDI and sample instrument (current)
 
 ANALYZE now performs real offline pitch tracking without changing the
 approved interface layout:
@@ -88,20 +88,26 @@ approved interface layout:
   Melotheon selects the safer source channel while preserving the
   original stereo audio for preview.
 
-Phase 3A intentionally produces a continuous pitch map, not editable
-notes or MIDI. That separation lets the detector be validated before
-note boundaries and MIDI timing are added.
+The continuous curve is now converted into stable, non-overlapping
+notes. Five-frame median smoothing, pitch hysteresis, short-gap repair
+and minimum-note filtering keep normal vibrato from creating unwanted
+MIDI notes. The same note sequence powers these features:
+
+- **EXPORT MIDI:** saves a standard `.mid` file using the selected MIDI
+  channel and the current FL Studio tempo when available.
+- **Load Sound:** the folder button in INSTRUMENT loads a WAV, AIFF,
+  FLAC or supported MP3 one-shot. Melotheon detects its root pitch,
+  renders the sung timing with that sound off the audio thread and lets
+  PLAY INSTRUMENT preview it. Unpitched sounds safely default to C4.
+- **Professional piano navigation:** real note blocks, a wider keyboard,
+  FIT, `-` / `+` vertical zoom, a scrollbar and mouse-wheel scrolling.
 
 ## What is NOT implemented yet
 
-- Note segmentation, editable note blocks and MIDI generation/export.
-- Instrument hosting, choir generation, voice multiplication.
+- Manual note editing and direct MIDI drag-and-drop into FL Studio.
+- Third-party instrument hosting, choir generation, voice multiplication.
 - AI / ONNX models.
-- Real Send to Channel / Drag MIDI behaviour.
-- SEND TO CHANNEL, DRAG MIDI TO FL and PLAY INSTRUMENT are still
-  non-functional.
-
-These are marked `// TODO: PHASE_3_AUDIO_LOGIC` in the code.
+- Real SEND TO CHANNEL and live MIDI output routing.
 
 ## Build (Windows, GitHub Actions)
 
@@ -122,7 +128,7 @@ The `.vst3` bundle lands under
 (usually `C:\Program Files\Common Files\VST3\`) and rescan plugins in
 FL Studio.
 
-Run the Phase 3A unit tests after any build:
+Run the Phase 3C unit tests after any build:
 
 ```bat
 ctest --test-dir build -C Release --output-on-failure

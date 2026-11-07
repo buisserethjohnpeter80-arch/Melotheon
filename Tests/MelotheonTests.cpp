@@ -1,4 +1,4 @@
-// Melotheon Phase 3A unit tests.
+// Melotheon Phase 3C unit tests.
 //
 // Console app, no GUI, no host, no MessageManager: every test calls
 // the audio-foundation classes (and the processor) directly. The
@@ -13,7 +13,10 @@
 #include "Audio/AudioClip.h"
 #include "Audio/AudioFileLoader.h"
 #include "Audio/AudioPreviewEngine.h"
+#include "Audio/SampleInstrumentRenderer.h"
 #include "Analysis/MonophonicPitchAnalyzer.h"
+#include "Analysis/NoteSegmenter.h"
+#include "Midi/MidiExporter.h"
 #include "PluginProcessor.h"
 
 #include <cmath>
@@ -491,6 +494,155 @@ void testPitchCurveFollowsTwoTones()
     CHECK (result->findNearestVoicedFrame (0.425, 0.03) == nullptr);
 }
 
+// ---- Phase 3C: stable notes, MIDI export, sample instrument ----
+
+void testNoteSegmentationRejectsVibratoAndBridgesGap()
+{
+    PitchAnalysisResult analysis;
+    analysis.durationSeconds = 1.0;
+    analysis.hopSeconds = 0.01;
+    analysis.frames.resize (100);
+
+    for (int i = 0; i < 100; ++i)
+    {
+        auto& frame = analysis.frames[static_cast<size_t> (i)];
+        frame.timeSeconds = static_cast<double> (i) * analysis.hopSeconds;
+        frame.rmsDb = -18.0f;
+        frame.confidence = 0.92f;
+        frame.voiced = true;
+
+        // A4 with ordinary vocal vibrato, a 30 ms detector gap, then C5.
+        if (i < 50)
+            frame.midiPitch = 69.0f + 0.28f * std::sin (static_cast<float> (i) * 0.7f);
+        else
+            frame.midiPitch = 72.0f + 0.22f * std::sin (static_cast<float> (i) * 0.6f);
+        frame.frequencyHz = 440.0f * std::pow (
+            2.0f, (frame.midiPitch - 69.0f) / 12.0f);
+        ++analysis.voicedFrameCount;
+    }
+    for (int i = 24; i < 27; ++i)
+    {
+        auto& frame = analysis.frames[static_cast<size_t> (i)];
+        frame.voiced = false;
+        frame.midiPitch = 0.0f;
+        frame.frequencyHz = 0.0f;
+        --analysis.voicedFrameCount;
+    }
+
+    auto notes = NoteSegmenter::segment (analysis);
+    CHECK (notes != nullptr);
+    CHECK (notes != nullptr && notes->notes.size() == 2);
+    if (notes == nullptr || notes->notes.size() != 2)
+        return;
+
+    CHECK (notes->notes[0].midiNote == 69);
+    CHECK (notes->notes[1].midiNote == 72);
+    CHECK (notes->notes[0].startSeconds <= 0.01);
+    CHECK (notes->notes[0].endSeconds >= 0.49);
+    CHECK (notes->lowestMidi == 69);
+    CHECK (notes->highestMidi == 72);
+}
+
+void testMidiExportRoundTrip()
+{
+    MelodyNoteSequence melody;
+    melody.durationSeconds = 1.5;
+    melody.lowestMidi = 60;
+    melody.highestMidi = 64;
+    melody.notes = {
+        { 0.25, 0.75, 60, 60.0f, 0.80f, 0.95f },
+        { 1.00, 1.40, 64, 64.0f, 0.70f, 0.90f },
+    };
+
+    MidiExportSettings settings;
+    settings.bpm = 120.0;
+    settings.channel = 3;
+    settings.ticksPerQuarterNote = 960;
+
+    const juce::File midiFile = getTestDir().getChildFile ("melody.mid");
+    midiFile.deleteFile();
+    juce::String error;
+    CHECK (MidiExporter::writeToFile (melody, midiFile, settings, error));
+    CHECK (error.isEmpty());
+    CHECK (midiFile.existsAsFile());
+    CHECK (midiFile.getSize() > 20);
+
+    juce::FileInputStream input (midiFile);
+    CHECK (input.openedOk());
+    juce::MidiFile parsed;
+    CHECK (parsed.readFrom (input));
+    CHECK (parsed.getTimeFormat() == 960);
+
+    int noteOns = 0;
+    int noteOffs = 0;
+    for (int trackIndex = 0; trackIndex < parsed.getNumTracks(); ++trackIndex)
+    {
+        const auto* track = parsed.getTrack (trackIndex);
+        if (track == nullptr)
+            continue;
+        for (int eventIndex = 0; eventIndex < track->getNumEvents(); ++eventIndex)
+        {
+            const auto message = track->getEventPointer (eventIndex)->message;
+            if (message.isNoteOn())
+            {
+                ++noteOns;
+                CHECK (message.getChannel() == 3);
+            }
+            if (message.isNoteOff())
+                ++noteOffs;
+        }
+    }
+    CHECK (noteOns == 2);
+    CHECK (noteOffs == 2);
+}
+
+void testSampleInstrumentFollowsMelody()
+{
+    constexpr double sampleRate = 48000.0;
+    auto oneShotBuffer = makeSine (sampleRate, 0.35, 440.0f, 0.45f);
+    auto oneShot = AudioClip::fromBuffer (
+        oneShotBuffer, sampleRate, "A4 one-shot", true);
+    CHECK (oneShot != nullptr);
+    if (oneShot == nullptr)
+        return;
+
+    MelodyNoteSequence melody;
+    melody.durationSeconds = 0.85;
+    melody.lowestMidi = 69;
+    melody.highestMidi = 81;
+    melody.notes = {
+        { 0.00, 0.35, 69, 69.0f, 0.85f, 0.95f },
+        { 0.42, 0.78, 81, 81.0f, 0.85f, 0.95f },
+    };
+
+    float progress = 0.0f;
+    auto rendered = SampleInstrumentRenderer::render (
+        *oneShot, melody, sampleRate, {},
+        [&progress] (float value) { progress = value; });
+    CHECK (rendered.succeeded());
+    CHECK (rendered.rootMidi == 69);
+    CHECK_NEAR (rendered.rootFrequencyHz, 440.0f, 4.0f);
+    CHECK_NEAR (progress, 1.0f, 1e-6f);
+    if (! rendered.succeeded())
+        return;
+
+    const auto& output = rendered.renderedClip->analysisMonoBuffer;
+    const int windowSamples = static_cast<int> (0.20 * sampleRate);
+    juce::AudioBuffer<float> first (1, windowSamples);
+    juce::AudioBuffer<float> second (1, windowSamples);
+    first.copyFrom (0, 0, output, 0, static_cast<int> (0.06 * sampleRate), windowSamples);
+    second.copyFrom (0, 0, output, 0, static_cast<int> (0.48 * sampleRate), windowSamples);
+
+    auto firstPitch = MonophonicPitchAnalyzer::analyze (first, sampleRate);
+    auto secondPitch = MonophonicPitchAnalyzer::analyze (second, sampleRate);
+    CHECK (firstPitch != nullptr && firstPitch->hasPitch());
+    CHECK (secondPitch != nullptr && secondPitch->hasPitch());
+    if (firstPitch != nullptr && firstPitch->hasPitch())
+        CHECK_NEAR (firstPitch->medianFrequencyHz, 440.0f, 6.0f);
+    if (secondPitch != nullptr && secondPitch->hasPitch())
+        CHECK_NEAR (secondPitch->medianFrequencyHz, 880.0f, 15.0f);
+}
+
 // ---- Processor: pass-through, meter, record -> preview loop ----
 
 void testProcessorPassThrough()
@@ -653,6 +805,9 @@ int main()
     testLowAndHighPitchAnalysis();
     testPitchAnalysisSilenceAndCancellation();
     testPitchCurveFollowsTwoTones();
+    testNoteSegmentationRejectsVibratoAndBridgesGap();
+    testMidiExportRoundTrip();
+    testSampleInstrumentFollowsMelody();
     testProcessorPassThrough();
     testProcessorRecordAndPreview();
     testProcessorEmptyTake();
@@ -661,7 +816,7 @@ int main()
     // Clean up the temp files.
     getTestDir().deleteRecursively();
 
-    std::cout << "Melotheon Phase 3A tests: " << (checks - failures) << "/" << checks
+    std::cout << "Melotheon Phase 3C tests: " << (checks - failures) << "/" << checks
               << " checks passed";
     if (failures == 0)
         std::cout << " - ALL GREEN\n";

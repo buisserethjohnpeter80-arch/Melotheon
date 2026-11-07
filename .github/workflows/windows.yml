@@ -25,7 +25,7 @@ jobs:
       - name: Build VST3
         run: cmake --build build --config Release --parallel 2
 
-      - name: Run Phase 2.1 tests
+      - name: Run Melotheon tests
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Validate VST3 with pluginval

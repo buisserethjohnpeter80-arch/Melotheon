@@ -1,6 +1,6 @@
 #pragma once
 
-// MelotheonAudioProcessorEditor - the plugin UI (Phase 3A).
+// MelotheonAudioProcessorEditor - the plugin UI (Phase 3C).
 //
 // Reference: the attached "MELODY CAPTURE" mockup (dark FL Studio-style
 // panels, orange active states, green status displays, central piano
@@ -17,9 +17,10 @@
 // the waveform shows the real clip, and Play / Stop / Play Original
 // preview it. The layout, colours, sizes and brand text are unchanged
 // from Phase 1. ANALYZE now runs offline monophonic pitch tracking and
-// paints its curve/confidence. SEND TO CHANNEL, DRAG MIDI TO FL and
-// PLAY INSTRUMENT remain later phases: no MIDI generation or instrument
-// hosting exists yet.
+// paints its curve/confidence and stable note blocks. The editor also
+// loads a local one-shot sound, previews the detected melody with it,
+// exports a standard MIDI file, and offers vertical piano zoom/scroll.
+// SEND TO CHANNEL remains a later host-integration phase.
 //
 // The editor polls the processor on a ~30 Hz timer (meter, playhead,
 // status, clip version) and never touches the audio thread directly.
@@ -71,6 +72,8 @@ private:
     // JUCE enables it). The chooser is kept alive in fileChooser
     // until its async callback runs.
     void startImport();
+    void startInstrumentImport();
+    void startMidiExport();
 
     MelotheonAudioProcessor& audioProcessor;
     MelotheonLookAndFeel lookAndFeel;
@@ -84,12 +87,16 @@ private:
     // still shows it.
     int lastClipVersionSeen = -1;
     int lastAnalysisVersionSeen = -1;
+    int lastMelodyNotesVersionSeen = -1;
+    int lastInstrumentVersionSeen = -1;
     int lastStatusSeen = -1;
     juce::String lastStatusText;
     juce::String lastNoteText;
     juce::String lastAnalyzeButtonText;
     bool lastPlayOriginalParam = false;
+    bool lastPlayInstrumentParam = false;
     std::shared_ptr<const PitchAnalysisResult> displayedAnalysis;
+    std::shared_ptr<const MelodyNoteSequence> displayedNotes;
 
     // The async callback keeps a shared owner until the native chooser
     // closes. A Component::SafePointer protects access to this editor.
@@ -145,7 +152,6 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> playOriginalAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> playInstrumentAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> inputSourceAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> instrumentAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> midiChannelAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MelotheonAudioProcessorEditor)
