@@ -42,6 +42,27 @@ PitchEditorComponent::PitchEditorComponent()
     zoomInButton.onClick = [this] { changeZoom (1.25f); };
     fitButton.onClick = [this] { fitToContent(); };
 
+    // Note-edit tool strip (MOVE / CUT / STRETCH): same dark tokens
+    // as the zoom buttons, selected tool highlighted orange. The
+    // small font keeps three labels inside the bar-number strip.
+    for (auto* button : { &moveToolButton, &cutToolButton, &stretchToolButton })
+    {
+        addAndMakeVisible (*button);
+        button->setLookAndFeel (&smallToolButtonLookAndFeel);
+        button->setColour (juce::TextButton::buttonColourId, Tokens::raisedPanel);
+        button->setColour (juce::TextButton::buttonOnColourId, Tokens::activeOrange);
+        button->setColour (juce::TextButton::textColourOffId, Tokens::primaryText);
+        button->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        button->setMouseClickGrabsKeyboardFocus (false);
+    }
+    moveToolButton.setTooltip ("Move notes: drag a block to any pitch or time");
+    cutToolButton.setTooltip ("Cut notes: click a block to split it in two");
+    stretchToolButton.setTooltip ("Stretch notes: drag a block edge to lengthen or shorten it");
+    moveToolButton.onClick = [this] { setEditTool (EditTool::Move); };
+    cutToolButton.onClick = [this] { setEditTool (EditTool::Cut); };
+    stretchToolButton.onClick = [this] { setEditTool (EditTool::Stretch); };
+    moveToolButton.setToggleState (true, juce::dontSendNotification);
+
     addAndMakeVisible (verticalScrollBar);
     verticalScrollBar.setAutoHide (false);
     verticalScrollBar.setColour (juce::ScrollBar::backgroundColourId,
@@ -141,6 +162,16 @@ void PitchEditorComponent::resized()
     zoomInButton.setBounds (right - 22, y, 22, buttonHeight);
     fitButton.setBounds (right - 62, y, 36, buttonHeight);
     zoomOutButton.setBounds (right - 88, y, 22, buttonHeight);
+
+    // Tool strip (MOVE | CUT | STRETCH) in the bar-number strip, in
+    // the empty gap between the bar 3 and bar 4 numbers, so it never
+    // covers a number. The right edge is anchored to the bar 4 beat
+    // geometry, so the strip stays in the gap when the component
+    // resizes.
+    const int toolRight = static_cast<int> (beatToXValue (12.0)) - 4;
+    stretchToolButton.setBounds (toolRight - 52, y, 52, buttonHeight);
+    cutToolButton.setBounds (toolRight - 52 - 3 - 32, y, 32, buttonHeight);
+    moveToolButton.setBounds (toolRight - 52 - 3 - 32 - 3 - 40, y, 40, buttonHeight);
     updateScrollBar();
 }
 
@@ -296,12 +327,176 @@ void PitchEditorComponent::applyCurveDragAt (float x, float y)
     repaint();
 }
 
+void PitchEditorComponent::setEditTool (EditTool tool)
+{
+    if (editTool == tool)
+        return;
+    editTool = tool;
+    moveToolButton.setToggleState (tool == EditTool::Move, juce::dontSendNotification);
+    cutToolButton.setToggleState (tool == EditTool::Cut, juce::dontSendNotification);
+    stretchToolButton.setToggleState (tool == EditTool::Stretch, juce::dontSendNotification);
+    repaint();
+}
+
+float PitchEditorComponent::beatWidthValue() const
+{
+    const float gridW = static_cast<float> (getWidth())
+                      - keyboardWidth - scrollBarWidth;
+    return gridW / static_cast<float> (totalBeats);
+}
+
+float PitchEditorComponent::beatToXValue (double beat) const
+{
+    return keyboardWidth + static_cast<float> (beat) * beatWidthValue();
+}
+
+double PitchEditorComponent::sequenceDurationSeconds() const
+{
+    if (noteSequence != nullptr && noteSequence->durationSeconds > 0.0)
+        return noteSequence->durationSeconds;
+    if (activeClip != nullptr)
+        return activeClip->durationSeconds;
+    return 0.0;
+}
+
+juce::Rectangle<float> PitchEditorComponent::noteBlockRect (const MelodyNote& note) const
+{
+    if (activeClip == nullptr || activeClip->durationSeconds <= 0.0)
+        return {};
+
+    const float gridX = keyboardWidth;
+    const float gridW = static_cast<float> (getWidth()) - keyboardWidth - scrollBarWidth;
+    const float gridH = static_cast<float> (getHeight()) - barNumberHeight;
+    const auto [lowestMidi, highestMidi] = visibleMidiRange();
+    if (note.midiNote < lowestMidi || note.midiNote > highestMidi)
+        return {};
+
+    const double start = juce::jlimit (
+        0.0, activeClip->durationSeconds, note.startSeconds);
+    const double end = juce::jlimit (
+        start, activeClip->durationSeconds, note.endSeconds);
+    if (end <= start)
+        return {};
+
+    const float x = gridX
+        + static_cast<float> (start / activeClip->durationSeconds) * gridW;
+    const float right = gridX
+        + static_cast<float> (end / activeClip->durationSeconds) * gridW;
+    const float y = midiToYValue (static_cast<float> (note.midiNote)) + 1.0f;
+    const float rowH = rowHeightValue();
+    juce::Rectangle<float> block (
+        x + 1.0f, y, juce::jmax (2.0f, right - x - 2.0f),
+        juce::jmax (2.0f, rowH - 2.0f));
+    return block.getIntersection (
+        juce::Rectangle<float> (gridX, barNumberHeight, gridW, gridH));
+}
+
+int PitchEditorComponent::noteAtPosition (float x, float y, int& edgeOut) const
+{
+    edgeOut = 0;
+    const MelodyNoteSequence* source = dragNoteEdited != nullptr
+        ? dragNoteEdited.get() : noteSequence.get();
+    if (source == nullptr || source->empty() || activeClip == nullptr)
+        return -1;
+
+    // Topmost first: later notes are drawn over earlier ones.
+    for (int i = static_cast<int> (source->notes.size()) - 1; i >= 0; --i)
+    {
+        const auto block = noteBlockRect (source->notes[static_cast<size_t> (i)]);
+        if (block.isEmpty() || ! block.contains (x, y))
+            continue;
+
+        if (editTool == EditTool::Stretch)
+        {
+            constexpr float edgeZone = 6.0f;
+            if (x - block.getX() <= edgeZone)
+                edgeOut = -1;
+            else if (block.getRight() - x <= edgeZone)
+                edgeOut = 1;
+        }
+        return i;
+    }
+    return -1;
+}
+
+void PitchEditorComponent::applyNoteDragAt (float x, float y)
+{
+    if (dragNoteEdited == nullptr || dragNoteOriginal == nullptr || dragNoteIndex < 0)
+        return;
+    const double duration = sequenceDurationSeconds();
+    const double clickSeconds = secondsForX (x);
+    if (clickSeconds < 0.0)
+        return;
+
+    // Recompute from the drag-start snapshot every move: the edit is
+    // one application of the current target, never an accumulation.
+    *dragNoteEdited = *dragNoteOriginal;
+    if (dragNoteEdge == 0)
+    {
+        // MOVE: vertical = pitch (semitone snap), horizontal = time
+        // (snap to the beat grid). The grab offset keeps the note
+        // from jumping under the mouse. Duration stays the same.
+        const double targetStart = MelodyEditor::snapSecondsToDisplayBeat (
+            clickSeconds - dragNoteGrabOffsetSeconds, duration);
+        const int targetMidi = juce::jlimit (
+            24, 108, juce::roundToInt (midiAtYValue (y)));
+        MelodyEditor::moveNote (*dragNoteEdited, dragNoteIndex,
+                                targetStart, targetMidi, duration);
+        if (onNoteEditNote != nullptr)
+            onNoteEditNote (dragNoteEdited->notes[
+                static_cast<size_t> (dragNoteIndex)].midiNote);
+    }
+    else
+    {
+        // STRETCH: the grabbed edge follows the mouse (beat snap);
+        // pitch, frames and recorded audio are untouched.
+        const double edgeSeconds = MelodyEditor::snapSecondsToDisplayBeat (
+            clickSeconds, duration);
+        MelodyEditor::stretchNoteEdge (*dragNoteEdited, dragNoteIndex,
+                                       dragNoteEdge < 0, edgeSeconds, duration);
+    }
+    repaint();
+}
+
+void PitchEditorComponent::cutNoteAt (int noteIndex, float x)
+{
+    if (noteSequence == nullptr || noteIndex < 0
+        || noteIndex >= static_cast<int> (noteSequence->notes.size()))
+        return;
+    const double clickSeconds = secondsForX (x);
+    if (clickSeconds < 0.0)
+        return;
+
+    auto edited = std::make_shared<MelodyNoteSequence> (*noteSequence);
+    // Snap to the beat grid when the click is already close to one;
+    // an off-grid click keeps its exact time. A click near an edge
+    // is clamped into the splittable range, so every CUT click on a
+    // note splits it (a note shorter than two minimum pieces cannot
+    // be split and is left alone).
+    const double cutSeconds = MelodyEditor::snapSecondsToDisplayBeatIfClose (
+        clickSeconds, sequenceDurationSeconds());
+    const auto& target = noteSequence->notes[static_cast<size_t> (noteIndex)];
+    const double clampedCut = juce::jlimit (
+        target.startSeconds + MelodyEditor::kMinimumNoteSeconds,
+        target.endSeconds - MelodyEditor::kMinimumNoteSeconds, cutSeconds);
+    if (! MelodyEditor::splitNoteAt (*edited, noteIndex, clampedCut))
+        return; // note too short to split into two valid pieces
+
+    if (onNoteEditCommitted != nullptr)
+        onNoteEditCommitted (edited, MelodyEditor::PitchShift {});
+}
+
 void PitchEditorComponent::mouseDown (const juce::MouseEvent& event)
 {
     draggingPlayhead = false;
     draggingCurve = false;
     dragCurveOriginal.reset();
     dragCurveEdited.reset();
+    draggingNote = false;
+    dragNoteIndex = -1;
+    dragNoteEdge = 0;
+    dragNoteOriginal.reset();
+    dragNoteEdited.reset();
 
     const float x = event.position.x;
     const float y = event.position.y;
@@ -320,21 +515,63 @@ void PitchEditorComponent::mouseDown (const juce::MouseEvent& event)
     if (x < keyboardWidth || activeClip == nullptr)
         return; // bar-number strip / keyboard edge: nothing to grab
 
-    // Grid: nearest target wins; the green playhead wins a tie.
+    // Grid click priority: playhead (within 6 px of the green line)
+    // first, then note block, then curve. A click inside a note block
+    // grabs the block, never the curve behind it.
     if (isNearPlayhead (x))
     {
         draggingPlayhead = true;
         return;
     }
 
-    double curveSeconds = 0.0;
-    float curveMidi = 0.0f;
-    if (curvePointNear (x, y, curveSeconds, curveMidi))
+    if (noteSequence != nullptr && ! noteSequence->empty())
     {
-        dragCurveOriginal = pitchAnalysis;
-        dragCurveEdited = std::make_shared<PitchAnalysisResult> (*pitchAnalysis);
-        draggingCurve = true;
-        applyCurveDragAt (x, y);
+        int edge = 0;
+        const int noteIndex = noteAtPosition (x, y, edge);
+        if (noteIndex >= 0)
+        {
+            const auto& note = noteSequence->notes[static_cast<size_t> (noteIndex)];
+
+            if (editTool == EditTool::Cut)
+            {
+                cutNoteAt (noteIndex, x);
+                return;
+            }
+
+            // MOVE / STRETCH: start a drag from a snapshot so the
+            // working copy is recomputed every move and the stored
+            // melody only changes on release (commit). In STRETCH
+            // mode an edge grab stretches; a body grab moves.
+            const double clickSeconds = secondsForX (x);
+            dragNoteOriginal = noteSequence;
+            dragNoteEdited = std::make_shared<MelodyNoteSequence> (*noteSequence);
+            dragNoteIndex = noteIndex;
+            dragNoteEdge = (editTool == EditTool::Stretch) ? edge : 0;
+            dragNoteGrabOffsetSeconds = clickSeconds >= 0.0
+                ? juce::jlimit (0.0, note.endSeconds - note.startSeconds,
+                                clickSeconds - note.startSeconds)
+                : 0.0;
+            draggingNote = true;
+            if (onNoteEditNote != nullptr)
+                onNoteEditNote (note.midiNote);
+            repaint();
+            return;
+        }
+    }
+
+    // Curve (MOVE tool only): the note blocks above already claimed
+    // their clicks, so the curve can never be grabbed through a block.
+    if (editTool == EditTool::Move)
+    {
+        double curveSeconds = 0.0;
+        float curveMidi = 0.0f;
+        if (curvePointNear (x, y, curveSeconds, curveMidi))
+        {
+            dragCurveOriginal = pitchAnalysis;
+            dragCurveEdited = std::make_shared<PitchAnalysisResult> (*pitchAnalysis);
+            draggingCurve = true;
+            applyCurveDragAt (x, y);
+        }
     }
 }
 
@@ -349,6 +586,12 @@ void PitchEditorComponent::mouseDrag (const juce::MouseEvent& event)
         if (onPlayheadSeek != nullptr)
             onPlayheadSeek (seconds);
         setPlayheadPosition (seconds);
+        return;
+    }
+
+    if (draggingNote)
+    {
+        applyNoteDragAt (event.position.x, event.position.y);
         return;
     }
 
@@ -388,6 +631,46 @@ void PitchEditorComponent::mouseUp (const juce::MouseEvent&)
         dragCurveEdited.reset();
     }
 
+    if (draggingNote)
+    {
+        draggingNote = false;
+        if (dragNoteEdited != nullptr && dragNoteOriginal != nullptr
+            && dragNoteIndex >= 0
+            && dragNoteIndex < static_cast<int> (dragNoteOriginal->notes.size())
+            && dragNoteIndex < static_cast<int> (dragNoteEdited->notes.size()))
+        {
+            const auto& original = dragNoteOriginal->notes[static_cast<size_t> (dragNoteIndex)];
+            const auto& edited = dragNoteEdited->notes[static_cast<size_t> (dragNoteIndex)];
+            // A plain click (no move) commits nothing, so the melody
+            // is never marked edited by accident.
+            const bool changed = edited.startSeconds != original.startSeconds
+                              || edited.endSeconds != original.endSeconds
+                              || edited.midiNote != original.midiNote;
+            if (changed && onNoteEditCommitted != nullptr)
+            {
+                // A pitch move also shifts the underlying pitch frames
+                // in that note's time range by the same delta, so the
+                // curve and the notes stay in sync. Time-only moves
+                // and stretches leave the frames alone.
+                MelodyEditor::PitchShift shift;
+                if (edited.midiNote != original.midiNote)
+                {
+                    shift.active = true;
+                    shift.centreSeconds = 0.5 * (original.startSeconds + original.endSeconds);
+                    shift.targetMidi = static_cast<float> (edited.midiNote);
+                    shift.windowSeconds = original.endSeconds - original.startSeconds;
+                }
+                onNoteEditCommitted (dragNoteEdited, shift);
+            }
+        }
+        dragNoteOriginal.reset();
+        dragNoteEdited.reset();
+        dragNoteIndex = -1;
+        dragNoteEdge = 0;
+        if (onNoteEditNote != nullptr)
+            onNoteEditNote (-1);
+    }
+
     if (auditionMidi >= 0)
     {
         auditionMidi = -1;
@@ -422,6 +705,25 @@ void PitchEditorComponent::mouseMove (const juce::MouseEvent& event)
     {
         setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
         return;
+    }
+    if (noteSequence != nullptr && ! noteSequence->empty())
+    {
+        int edge = 0;
+        if (noteAtPosition (event.position.x, event.position.y, edge) >= 0)
+        {
+            if (editTool == EditTool::Cut)
+            {
+                setMouseCursor (juce::MouseCursor::CrosshairCursor);
+                return;
+            }
+            if (editTool == EditTool::Stretch && edge != 0)
+            {
+                setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+                return;
+            }
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+            return;
+        }
     }
     double curveSeconds = 0.0;
     float curveMidi = 0.0f;
@@ -683,11 +985,16 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         // ---- Segmented melody notes. ----
         // These blocks are the stable notes used by both MIDI export and
         // the sample instrument. The original confidence controls opacity,
-        // so uncertain detector edges remain visually honest.
-        if (noteSequence != nullptr && ! noteSequence->empty()
+        // so uncertain detector edges remain visually honest. While the
+        // user drags a note, paint the working copy so the block
+        // follows the mouse; the stored melody only changes on release
+        // (commit).
+        const MelodyNoteSequence* notesSource = dragNoteEdited != nullptr
+            ? dragNoteEdited.get() : noteSequence.get();
+        if (notesSource != nullptr && ! notesSource->empty()
             && activeClip->durationSeconds > 0.0)
         {
-            for (const auto& note : noteSequence->notes)
+            for (const auto& note : notesSource->notes)
             {
                 if (note.midiNote < lowestMidi || note.midiNote > highestMidi)
                     continue;
