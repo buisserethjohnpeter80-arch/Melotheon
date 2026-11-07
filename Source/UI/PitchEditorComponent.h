@@ -59,6 +59,23 @@ public:
     // component then only moves its own displayed playhead.
     std::function<void (double)> onPlayheadSeek;
 
+    // Piano-key audition (message thread). mouseDown on a keyboard
+    // key starts the note, mouseUp / mouseExit stops it; sliding
+    // across keys while held re-triggers (glissando). The editor
+    // forwards these to the processor's audition voice and shows the
+    // note name in the note LCD.
+    std::function<void (int)> onAuditionStart; // MIDI note
+    std::function<void()> onAuditionStop;
+
+    // Manual pitch-curve correction (message thread). While the user
+    // drags the orange curve, onCurveEditNote reports the quantized
+    // semitone under the mouse (the editor shows it in the note LCD).
+    // On release, onCurveEditCommitted hands the edited analysis to
+    // the editor, which commits it to the processor (re-segmentation
+    // + instrument re-render). The grey waveform is never editable.
+    std::function<void (int)> onCurveEditNote; // quantized MIDI note
+    std::function<void (std::shared_ptr<PitchAnalysisResult>)> onCurveEditCommitted;
+
     // False while recording: the playhead cannot be grabbed then.
     // The editor updates this from its timer.
     void setSeekEnabled (bool enabled) { seekEnabled = enabled; }
@@ -68,6 +85,7 @@ public:
     void mouseDown (const juce::MouseEvent& event) override;
     void mouseDrag (const juce::MouseEvent& event) override;
     void mouseUp (const juce::MouseEvent& event) override;
+    void mouseExit (const juce::MouseEvent& event) override;
     void mouseMove (const juce::MouseEvent& event) override;
     void mouseWheelMove (const juce::MouseEvent& event,
                          const juce::MouseWheelDetails& wheel) override;
@@ -116,6 +134,27 @@ private:
     double secondsForX (float x) const; // -1 when no clip is loaded
     bool isNearPlayhead (float x) const;
 
+    // Curve / keyboard geometry (same constants as paint()).
+    float rowHeightValue() const;
+    float midiToYValue (float midiNote) const;
+    // Inverse of the curve's y (centre of the row for a pitch).
+    float midiAtYValue (float y) const;
+    // The keyboard row under a y position (whole semitone row).
+    int keyMidiAtY (float y) const;
+    // True when (x, y) is within the grab tolerance of a voiced
+    // curve point; returns that point's time and pitch.
+    bool curvePointNear (float x, float y, double& secondsOut,
+                         float& midiOut) const;
+    // Apply the current curve drag at a mouse position (recomputed
+    // from the drag-start snapshot every move, so edits never
+    // accumulate). No-op when no curve drag is active.
+    void applyCurveDragAt (float x, float y);
+
+    // Half-width of the smooth edit window around the grab point.
+    static constexpr double curveEditWindowSeconds = 0.15;
+    // Grab tolerance for the orange curve, in pixels.
+    static constexpr float curveGrabTolerancePx = 8.0f;
+
     bool isBlackKey (int midiNote) const;
     juce::String noteName (int midiNote) const;
     std::pair<int, int> visibleMidiRange() const;
@@ -128,6 +167,18 @@ private:
     float analysisProgress = -1.0f;
     bool seekEnabled = true;
     bool draggingPlayhead = false;
+
+    // Piano-key audition: the MIDI note currently held (-1 = none).
+    // The held key is highlighted in paint().
+    int auditionMidi = -1;
+
+    // Manual curve drag: the analysis snapshot at grab time and the
+    // working copy that follows the mouse. paint() draws the working
+    // copy while a drag is active; the processor only sees it on
+    // mouseUp (commit), so note blocks update once, on release.
+    bool draggingCurve = false;
+    std::shared_ptr<const PitchAnalysisResult> dragCurveOriginal;
+    std::shared_ptr<PitchAnalysisResult> dragCurveEdited;
 
     juce::TextButton zoomOutButton { "-" };
     juce::TextButton fitButton { "FIT" };
