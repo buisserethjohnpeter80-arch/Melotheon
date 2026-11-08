@@ -80,15 +80,21 @@ MelotheonAudioProcessor::MelotheonAudioProcessor()
     midiOutParam = apvts.getRawParameterValue ("midiOut");
     sendToChannelParam = apvts.getRawParameterValue ("sendToChannel");
     midiChannelParam = apvts.getRawParameterValue ("midiChannel");
+    noiseGateParam = apvts.getRawParameterValue ("noiseGate");
 
     // P2-8: turning SEND TO CHANNEL on auto-enables the MIDI OUT
     // master (see parameterChanged).
     apvts.addParameterListener ("sendToChannel", this);
+    // Exclusive input source: changing the source clears the old
+    // clip so the two sources can never mix (see parameterChanged).
+    apvts.addParameterListener ("inputSource", this);
+    lastAppliedInputSource = getInputSource();
 }
 
 MelotheonAudioProcessor::~MelotheonAudioProcessor()
 {
     apvts.removeParameterListener ("sendToChannel", this);
+    apvts.removeParameterListener ("inputSource", this);
     aliveFlag->store (false, std::memory_order_release);
     pitchAnalysisEngine.cancel();
     sampleRenderEngine.cancel();
@@ -154,10 +160,15 @@ MelotheonAudioProcessor::createParameterLayout()
     // LIVE INPUT captures host audio; IMPORTED AUDIO plays the loaded
     // file / recorded clip. (Phase 1 had VOICE / GUITAR / PIANO /
     // LINE here; those were labels only, never audio routings.)
+    // Default is IMPORTED AUDIO: on an empty track Live Input is
+    // not active by default — the user imports, switches to LIVE
+    // INPUT to record, or lets voice auto-detection lock LIVE when
+    // a voice is actually heard on the track (see pollVoiceDetection).
+    // Old saved projects keep their saved value (APVTS state restore).
     layout.add (std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID { "inputSource", 1 }, "Input Source",
         juce::StringArray { "LIVE INPUT", "IMPORTED AUDIO" },
-        0));
+        1));
     layout.add (std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID { "midiChannel", 1 }, "MIDI Channel",
         juce::StringArray { "CHANNEL 1", "CHANNEL 2", "CHANNEL 3",
@@ -200,6 +211,14 @@ void MelotheonAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     meterPeakLinear = 0.0f;
     meterRmsLinear = 0.0f;
     silentSamples = 0;
+
+    // Fresh voice-detection accounting for the new stream (the
+    // detected flag itself is sticky for the session: once a voice
+    // was heard, it stays heard — only the lock application can
+    // still be pending, and it re-detects within 0.5 s of voice
+    // if a re-prepare ever dropped the accumulator mid-detection).
+    voiceDetectVoicedSeconds = 0.0;
+    voiceDetectSilentSeconds = 0.0;
 
     // A re-prepare aborts any take in progress (its partial capture
     // is discarded by captureEngine.prepare()).
@@ -359,6 +378,10 @@ bool MelotheonAudioProcessor::startRecording()
 
     if (! captureEngine.startRecording())
         return false;
+
+    // Pressing REC is a source decision: voice auto-detection must
+    // never override it later.
+    userChoseSource = true;
 
     setStatus (Status::Recording);
     return true;
@@ -945,6 +968,20 @@ void MelotheonAudioProcessor::renderMidiOut (juce::MidiBuffer& midiMessages,
 
 void MelotheonAudioProcessor::startFileImport (const juce::File& file)
 {
+    // Exclusive input source: files only load in IMPORTED AUDIO
+    // mode (the mirror of startRecording's "USE LIVE INPUT").
+    if (getInputSource() != InputSource::Imported)
+    {
+        lastErrorMessage = "USE IMPORTED AUDIO";
+        setStatus (Status::Error);
+        return;
+    }
+
+    // Starting an import is a source decision (and an import in
+    // flight must not be disturbed): voice auto-detection must
+    // never override it later.
+    userChoseSource = true;
+
     if (! file.existsAsFile())
     {
         lastErrorMessage = "FILE NOT FOUND";
@@ -972,7 +1009,16 @@ void MelotheonAudioProcessor::startFileImport (const juce::File& file)
                 return; // processor is being destroyed
 
             if (result.succeeded())
+            {
+                // The source may have changed while the file
+                // decoded: a stale result must never install a clip
+                // for the wrong source. The loader's generation
+                // guard already drops cancelled loads; this re-check
+                // covers any path that did not cancel.
+                if (getInputSource() != InputSource::Imported)
+                    return;
                 installClip (result.clip, Status::AudioReady);
+            }
             else
             {
                 lastErrorMessage = result.errorMessage;
@@ -1259,6 +1305,49 @@ void MelotheonAudioProcessor::setMidiOutParameter (bool shouldEnable)
 void MelotheonAudioProcessor::parameterChanged (const juce::String& parameterID,
                                               float newValue)
 {
+    // Exclusive input source: changing the source clears the old
+    // clip so the two sources can never mix. Same-source selection
+    // is a no-op (no spurious clear). Host-driven changes can arrive
+    // on the audio thread, where clearing the clip is unsafe: act
+    // synchronously on the message thread, otherwise defer with
+    // callAsync (guarded by aliveFlag, the same pattern as the
+    // file-load callbacks and the SEND TO CHANNEL auto-enable below).
+    if (parameterID == "inputSource")
+    {
+        const auto newSource = newValue > 0.5f ? InputSource::Imported
+                                               : InputSource::Live;
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+            mm != nullptr && mm->isThisTheMessageThread())
+        {
+            handleInputSourceChangeOnMessageThread (newSource);
+        }
+        else if (mm != nullptr)
+        {
+            auto alive = aliveFlag;
+            mm->callAsync ([this, alive, newSource]
+            {
+                // Re-check at run time: the source may have changed
+                // again (or back) after this deferral was queued, and
+                // the stale switch must not clear the current clip.
+                // The lock check inside the handler covers a lock
+                // that engaged meanwhile (it reverts to LIVE INPUT).
+                if (alive->load (std::memory_order_acquire)
+                    && getInputSource() == newSource)
+                    handleInputSourceChangeOnMessageThread (newSource);
+            });
+        }
+        else
+        {
+            // No MessageManager (a console test without a GUI):
+            // apply inline. The switch only touches message-thread
+            // state and the calling thread is the only thread
+            // running, the same as the direct processor calls in
+            // the tests.
+            handleInputSourceChangeOnMessageThread (newSource);
+        }
+        return;
+    }
+
     // P2-8: SEND TO CHANNEL on auto-enables the MIDI OUT master.
     // Only the sendToChannel change is observed, so setting midiOut
     // here cannot loop back. Turning SEND off leaves MIDI OUT
@@ -1291,6 +1380,146 @@ void MelotheonAudioProcessor::parameterChanged (const juce::String& parameterID,
     }
     // No MessageManager (a console test without a GUI): nothing to
     // defer to. The P2-8 test creates one explicitly.
+}
+
+void MelotheonAudioProcessor::handleInputSourceChangeOnMessageThread (
+    InputSource newSource)
+{
+    // A change the auto-detector itself forced: record it only.
+    // Never clear anything and never mark a user choice — the
+    // detector only fires while the plugin is undecided (no clip),
+    // so there is nothing to clear.
+    if (applyingAutoDetectSource)
+    {
+        lastAppliedInputSource = newSource;
+        return;
+    }
+
+    // Locked by voice detection: the user cannot leave LIVE INPUT.
+    // Revert the parameter to Live (setValueNotifyingHost keeps the
+    // ValueTree + host in sync). The nested notification terminates:
+    // the inner call is for Live, which equals
+    // lastAppliedInputSource, so it returns immediately below.
+    if (voiceDetectionLocked && newSource != InputSource::Live)
+    {
+        if (auto* param = apvts.getParameter ("inputSource"); param != nullptr)
+            param->setValueNotifyingHost (0.0f);
+        return;
+    }
+
+    if (newSource == lastAppliedInputSource)
+        return; // same source: nothing to clear
+
+    // A manual source change is a decision: voice auto-detection
+    // must never override it later.
+    userChoseSource = true;
+    applyInputSourceChange (newSource);
+}
+
+void MelotheonAudioProcessor::pollVoiceDetection()
+{
+    // Message thread only (called by the editor's timer, ~30 Hz).
+    // The audio thread only sets the flag; this applies it. Cheap
+    // early return while nothing was detected or the lock is set.
+    if (! voiceDetectedFlag.load (std::memory_order_acquire)
+        || voiceDetectionLocked)
+        return;
+
+    applyVoiceDetection();
+}
+
+void MelotheonAudioProcessor::applyVoiceDetection()
+{
+    // Message thread only. Forces LIVE INPUT only while the plugin
+    // is still undecided: no clip loaded AND the user has not
+    // chosen a source (no manual change, no import, no recording).
+    // Once the user has a clip or has chosen a source, detection
+    // never switches and never clears anything — a user who
+    // imported a file must not lose it because the track's voice
+    // is detected later when they press PLAY.
+    if (voiceDetectionLocked || userChoseSource || hasActiveClip())
+        return;
+
+    // Force the parameter through the APVTS so the ValueTree, the
+    // host and the saved state all see LIVE INPUT. The listener
+    // records the change only (applyingAutoDetectSource): no clear,
+    // no user-choice mark. The source is always IMPORTED here (the
+    // undecided default), so the change always notifies; the direct
+    // lastAppliedInputSource update below covers the no-notify
+    // case anyway.
+    applyingAutoDetectSource = true;
+    if (auto* param = apvts.getParameter ("inputSource"); param != nullptr)
+        param->setValueNotifyingHost (0.0f);
+    applyingAutoDetectSource = false;
+    lastAppliedInputSource = InputSource::Live;
+
+    // Lock for the session (until the plugin is closed/reloaded):
+    // the dropdown greys out and later changes are reverted (see
+    // handleInputSourceChangeOnMessageThread).
+    voiceDetectionLocked = true;
+    setStatusHint ("VOICE DETECTED - LIVE INPUT");
+}
+
+void MelotheonAudioProcessor::clearActiveClip()
+{
+    // The single clip-clearing path (see the header): cancel any
+    // in-flight analysis/render, drop the analysis + melody + undo
+    // history, detach both preview engines from the clip (they defer
+    // the ownership change until any in-flight render finishes, so
+    // this is safe with respect to the audio thread) and release the
+    // clip. The clip version bumps only when a clip was actually
+    // removed: a switch with nothing loaded must not look like a
+    // new clip to the editor (or to the project-state audio cache).
+    const bool hadClip = activeClip != nullptr;
+    clearPitchAnalysis();
+    clearEditHistory();
+    previewEngine.setClip (nullptr);
+    instrumentPreviewEngine.setClip (nullptr);
+    activeClip.reset();
+    if (hadClip)
+        clipVersion.fetch_add (1, std::memory_order_acq_rel);
+}
+
+void MelotheonAudioProcessor::applyInputSourceChange (InputSource newSource)
+{
+    // Message thread only. The listener guards the same-source case
+    // too, but the deferred path re-checks here so a queued switch
+    // for an outdated source cannot clear a clip the user has since
+    // re-selected.
+    if (newSource == lastAppliedInputSource)
+        return;
+    lastAppliedInputSource = newSource;
+
+    // A take in progress belongs to the old source: discard it.
+    // stopRecording() waits for the audio writer and drops the
+    // unfinalized samples (no clip is installed); the limit flag
+    // goes too, so a limit take cannot finalize later either.
+    const bool hadTake = captureEngine.isRecording() || captureEngine.limitReached();
+    captureEngine.stopRecording();
+    captureEngine.clearLimitFlag();
+
+    // A file load in flight belongs to the old source: cancel it.
+    // The loader's generation guard drops its message-thread
+    // callback, and startFileImport's completion re-checks the
+    // source before installing anything.
+    fileLoader.cancelPendingLoad();
+
+    // Stop playback: the old clip is going away.
+    previewEngine.stop();
+    instrumentPreviewEngine.stop();
+    setPlayOriginalParameter (false);
+    setPlayInstrumentParameter (false);
+
+    // The message names what was lost; a switch with nothing loaded
+    // needs no explanation beyond the empty state.
+    const bool hadSomething = hadTake || hasActiveClip()
+        || pitchAnalysis != nullptr || melodyNotes != nullptr;
+    clearActiveClip();
+
+    lastErrorMessage.clear();
+    setStatus (Status::EmptySource);
+    if (hadSomething)
+        setStatusHint ("SOURCE CHANGED - CLIP CLEARED");
 }
 
 juce::String MelotheonAudioProcessor::getMidiRoutingHint() const
@@ -1688,6 +1917,46 @@ void MelotheonAudioProcessor::updateInputMeter (const juce::AudioBuffer<float>& 
                                       juce::Decibels::gainToDecibels (meterRmsLinear));
     inputPeakDb.store (peakDb, std::memory_order_release);
     inputRmsDb.store (rmsDb, std::memory_order_release);
+
+    // Voice auto-detection reads the same block (see
+    // updateVoiceDetection): the incoming host audio, before any
+    // preview overwrites the buffer.
+    updateVoiceDetection (blockRms, dt);
+}
+
+void MelotheonAudioProcessor::updateVoiceDetection (float blockRms, double dt)
+{
+    // Audio thread only. Once a voice was detected there is nothing
+    // more to accumulate: the flag is sticky for the session.
+    if (voiceDetectedFlag.load (std::memory_order_acquire))
+        return;
+
+    // Threshold: the same silence definition the pitch analysis
+    // uses (noiseGate mapped to -72..-35 dB), floored at -50 dB so
+    // background noise / hum cannot lock the source.
+    const float gate = noiseGateParam != nullptr
+        ? noiseGateParam->load (std::memory_order_acquire) : 0.3f;
+    const float thresholdDb = juce::jmax (
+        juce::jmap (juce::jlimit (0.0f, 1.0f, gate), -72.0f, -35.0f),
+        voiceDetectThresholdFloorDb);
+    const float thresholdLinear = juce::Decibels::decibelsToGain (thresholdDb);
+
+    if (blockRms >= thresholdLinear)
+    {
+        voiceDetectVoicedSeconds += dt;
+        voiceDetectSilentSeconds = 0.0;
+    }
+    else
+    {
+        voiceDetectSilentSeconds += dt;
+        // Isolated transients never add up: 2 s of continuous
+        // silence resets the voiced accumulator.
+        if (voiceDetectSilentSeconds >= voiceDetectSilenceResetSeconds)
+            voiceDetectVoicedSeconds = 0.0;
+    }
+
+    if (voiceDetectVoicedSeconds >= voiceDetectSustainSeconds)
+        voiceDetectedFlag.store (true, std::memory_order_release);
 }
 
 void MelotheonAudioProcessor::updateSilenceStatus (int numSamples)
@@ -1804,11 +2073,7 @@ void MelotheonAudioProcessor::applyRestoredProject (ProjectState::Data project)
     }
     else
     {
-        clearPitchAnalysis();
-        previewEngine.setClip (nullptr);
-        instrumentPreviewEngine.setClip (nullptr);
-        activeClip.reset();
-        clipVersion.fetch_add (1, std::memory_order_acq_rel);
+        clearActiveClip();
         setStatus (Status::EmptySource);
         if (project.audioSkippedTooLarge)
             setStatusHint ("AUDIO TOO LARGE - NOT SAVED");
