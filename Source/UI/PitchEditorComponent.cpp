@@ -45,7 +45,8 @@ PitchEditorComponent::PitchEditorComponent()
     // Note-edit tool strip (MOVE / CUT / STRETCH): same dark tokens
     // as the zoom buttons, selected tool highlighted orange. The
     // small font keeps three labels inside the bar-number strip.
-    for (auto* button : { &moveToolButton, &cutToolButton, &stretchToolButton })
+    for (auto* button : { &moveToolButton, &cutToolButton, &stretchToolButton,
+                          &undoButton, &redoButton })
     {
         addAndMakeVisible (*button);
         button->setLookAndFeel (&smallToolButtonLookAndFeel);
@@ -58,10 +59,16 @@ PitchEditorComponent::PitchEditorComponent()
     moveToolButton.setTooltip ("Move notes: drag a block to any pitch or time");
     cutToolButton.setTooltip ("Cut notes: click a block to split it in two");
     stretchToolButton.setTooltip ("Stretch notes: drag a block edge to lengthen or shorten it");
+    undoButton.setTooltip ("Undo the last note or curve edit");
+    redoButton.setTooltip ("Redo the last undone edit");
     moveToolButton.onClick = [this] { setEditTool (EditTool::Move); };
     cutToolButton.onClick = [this] { setEditTool (EditTool::Cut); };
     stretchToolButton.onClick = [this] { setEditTool (EditTool::Stretch); };
+    undoButton.onClick = [this] { if (onUndoRequested != nullptr) onUndoRequested(); };
+    redoButton.onClick = [this] { if (onRedoRequested != nullptr) onRedoRequested(); };
     moveToolButton.setToggleState (true, juce::dontSendNotification);
+    undoButton.setEnabled (false);
+    redoButton.setEnabled (false);
 
     addAndMakeVisible (verticalScrollBar);
     verticalScrollBar.setAutoHide (false);
@@ -104,6 +111,30 @@ void PitchEditorComponent::setClip (std::shared_ptr<const AudioClip> clip)
     rebuildWaveformCache();
     playheadSeconds = (activeClip != nullptr) ? 0.0 : -1.0;
     fitToContent();
+}
+
+void PitchEditorComponent::setTempoGrid (const TempoGrid& grid)
+{
+    if (tempoGrid == grid)
+        return;
+    tempoGrid = grid;
+    // The grid geometry (and the tool-strip placement) changed.
+    resized();
+    repaint();
+}
+
+int PitchEditorComponent::displayTotalBeats() const
+{
+    if (activeClip == nullptr || activeClip->durationSeconds <= 0.0)
+        return placeholderTotalBeats;
+    return tempoGrid.totalBeats (activeClip->durationSeconds);
+}
+
+double PitchEditorComponent::displayBeatsPerBar() const
+{
+    if (activeClip == nullptr || activeClip->durationSeconds <= 0.0)
+        return placeholderBeatsPerBar;
+    return tempoGrid.beatsPerBar();
 }
 
 void PitchEditorComponent::setPitchAnalysis (
@@ -163,15 +194,36 @@ void PitchEditorComponent::resized()
     fitButton.setBounds (right - 62, y, 36, buttonHeight);
     zoomOutButton.setBounds (right - 88, y, 22, buttonHeight);
 
-    // Tool strip (MOVE | CUT | STRETCH) in the bar-number strip, in
-    // the empty gap between the bar 3 and bar 4 numbers, so it never
-    // covers a number. The right edge is anchored to the bar 4 beat
-    // geometry, so the strip stays in the gap when the component
-    // resizes.
-    const int toolRight = static_cast<int> (beatToXValue (12.0)) - 4;
-    stretchToolButton.setBounds (toolRight - 52, y, 52, buttonHeight);
-    cutToolButton.setBounds (toolRight - 52 - 3 - 32, y, 32, buttonHeight);
-    moveToolButton.setBounds (toolRight - 52 - 3 - 32 - 3 - 40, y, 40, buttonHeight);
+    // Tool strip (UNDO | REDO | MOVE | CUT | STRETCH) in the
+    // bar-number strip, in a gap between bar numbers, so it never
+    // covers one. The bar starts come from the display grid (host
+    // tempo when a clip is loaded), so the strip moves when the tempo
+    // changes; when no gap fits it right-aligns before the KEY ZOOM
+    // label and nudges left past any number (see
+    // toolStripLeftForBarStarts).
+    const float stripWidth = 40.0f + 3.0f + 40.0f + 3.0f + 40.0f
+                           + 3.0f + 32.0f + 3.0f + 52.0f;
+    std::vector<float> barStarts;
+    const int numBars = tempoGrid.totalBars (
+        activeClip != nullptr ? activeClip->durationSeconds : 0.0);
+    for (int bar = 0; bar < numBars; ++bar)
+        barStarts.push_back (beatToXValue (tempoGrid.barStartBeat (bar)));
+    if (activeClip == nullptr)
+    {
+        for (int bar = 0; bar < 4; ++bar)
+            barStarts.push_back (beatToXValue (
+                static_cast<double> (bar) * placeholderBeatsPerBar));
+    }
+    const float zoneLeft = keyboardWidth + 2.0f;
+    const float zoneRight = static_cast<float> (getWidth())
+                          - scrollBarWidth - 152.0f - 4.0f;
+    const int toolLeft = toolStripLeftForBarStarts (
+        barStarts, zoneLeft, zoneRight, stripWidth);
+    stretchToolButton.setBounds (toolLeft + 164, y, 52, buttonHeight);
+    cutToolButton.setBounds (toolLeft + 129, y, 32, buttonHeight);
+    moveToolButton.setBounds (toolLeft + 86, y, 40, buttonHeight);
+    redoButton.setBounds (toolLeft + 43, y, 40, buttonHeight);
+    undoButton.setBounds (toolLeft, y, 40, buttonHeight);
     updateScrollBar();
 }
 
@@ -338,11 +390,63 @@ void PitchEditorComponent::setEditTool (EditTool tool)
     repaint();
 }
 
+void PitchEditorComponent::setUndoRedoEnabled (bool canUndo, bool canRedo)
+{
+    undoButton.setEnabled (canUndo);
+    redoButton.setEnabled (canRedo);
+}
+
+PitchEditorComponent::GridCursor PitchEditorComponent::cursorForPosition (
+    EditTool tool, bool overKeyboard, bool nearPlayhead, bool overNote,
+    int noteEdge, bool nearCurve)
+{
+    // Priority: keyboard, playhead, note block, curve. The curve-edit
+    // cursor is offered ONLY in MOVE mode: in CUT / STRETCH a click
+    // on the curve does nothing, so the cursor must not promise it.
+    if (overKeyboard)
+        return GridCursor::PointingHand;
+    if (nearPlayhead)
+        return GridCursor::LeftRightResize;
+    if (overNote)
+    {
+        if (tool == EditTool::Cut)
+            return GridCursor::Crosshair;
+        if (tool == EditTool::Stretch && noteEdge != 0)
+            return GridCursor::LeftRightResize;
+        return GridCursor::DraggingHand;
+    }
+    if (nearCurve && tool == EditTool::Move)
+        return GridCursor::UpDownResize;
+    return GridCursor::Normal;
+}
+
+juce::MouseCursor PitchEditorComponent::toMouseCursor (GridCursor cursor)
+{
+    switch (cursor)
+    {
+        case GridCursor::PointingHand:    return juce::MouseCursor::PointingHandCursor;
+        case GridCursor::LeftRightResize: return juce::MouseCursor::LeftRightResizeCursor;
+        case GridCursor::Crosshair:       return juce::MouseCursor::CrosshairCursor;
+        case GridCursor::DraggingHand:    return juce::MouseCursor::DraggingHandCursor;
+        case GridCursor::UpDownResize:    return juce::MouseCursor::UpDownResizeCursor;
+        case GridCursor::Normal: default: return juce::MouseCursor::NormalCursor;
+    }
+}
+
 float PitchEditorComponent::beatWidthValue() const
 {
     const float gridW = static_cast<float> (getWidth())
                       - keyboardWidth - scrollBarWidth;
-    return gridW / static_cast<float> (totalBeats);
+    // Seconds-based: one beat is beatSeconds() of the clip, so a beat
+    // line and a note at the same time share the same x (notes, the
+    // curve and the playhead are all drawn from seconds). The old
+    // width (gridW / totalBeats) stretched beats to fill the width,
+    // so notes sat off their grid lines whenever the clip was not a
+    // whole number of beats.
+    if (activeClip != nullptr && activeClip->durationSeconds > 0.0)
+        return gridW * static_cast<float> (
+            tempoGrid.beatSeconds() / activeClip->durationSeconds);
+    return gridW / static_cast<float> (juce::jmax (1, displayTotalBeats()));
 }
 
 float PitchEditorComponent::beatToXValue (double beat) const
@@ -434,10 +538,11 @@ void PitchEditorComponent::applyNoteDragAt (float x, float y)
     if (dragNoteEdge == 0)
     {
         // MOVE: vertical = pitch (semitone snap), horizontal = time
-        // (snap to the beat grid). The grab offset keeps the note
-        // from jumping under the mouse. Duration stays the same.
-        const double targetStart = MelodyEditor::snapSecondsToDisplayBeat (
-            clickSeconds - dragNoteGrabOffsetSeconds, duration);
+        // (snap to the host-tempo beat grid). The grab offset keeps
+        // the note from jumping under the mouse. Duration stays the same.
+        const double targetStart = MelodyEditor::snapSecondsToBeat (
+            clickSeconds - dragNoteGrabOffsetSeconds,
+            beatLengthSeconds(), duration);
         const int targetMidi = juce::jlimit (
             24, 108, juce::roundToInt (midiAtYValue (y)));
         MelodyEditor::moveNote (*dragNoteEdited, dragNoteIndex,
@@ -450,8 +555,8 @@ void PitchEditorComponent::applyNoteDragAt (float x, float y)
     {
         // STRETCH: the grabbed edge follows the mouse (beat snap);
         // pitch, frames and recorded audio are untouched.
-        const double edgeSeconds = MelodyEditor::snapSecondsToDisplayBeat (
-            clickSeconds, duration);
+        const double edgeSeconds = MelodyEditor::snapSecondsToBeat (
+            clickSeconds, beatLengthSeconds(), duration);
         MelodyEditor::stretchNoteEdge (*dragNoteEdited, dragNoteIndex,
                                        dragNoteEdge < 0, edgeSeconds, duration);
     }
@@ -473,8 +578,8 @@ void PitchEditorComponent::cutNoteAt (int noteIndex, float x)
     // is clamped into the splittable range, so every CUT click on a
     // note splits it (a note shorter than two minimum pieces cannot
     // be split and is left alone).
-    const double cutSeconds = MelodyEditor::snapSecondsToDisplayBeatIfClose (
-        clickSeconds, sequenceDurationSeconds());
+    const double cutSeconds = MelodyEditor::snapSecondsToBeatIfClose (
+        clickSeconds, beatLengthSeconds(), sequenceDurationSeconds());
     const auto& target = noteSequence->notes[static_cast<size_t> (noteIndex)];
     const double clampedCut = juce::jlimit (
         target.startSeconds + MelodyEditor::kMinimumNoteSeconds,
@@ -695,45 +800,30 @@ void PitchEditorComponent::mouseExit (const juce::MouseEvent&)
 
 void PitchEditorComponent::mouseMove (const juce::MouseEvent& event)
 {
-    if (event.position.x < keyboardWidth
-        && event.position.y >= barNumberHeight)
-    {
-        setMouseCursor (juce::MouseCursor::PointingHandCursor);
-        return;
-    }
-    if (isNearPlayhead (event.position.x))
-    {
-        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
-        return;
-    }
+    const bool overKeyboard = event.position.x < keyboardWidth
+        && event.position.y >= barNumberHeight;
+    // The playhead can only be grabbed inside the grid (mouseDown
+    // returns early left of it), so the resize cursor must not show
+    // for the strip above the keyboard when the playhead is at 0.
+    const bool nearPlayhead = event.position.x >= keyboardWidth
+        && isNearPlayhead (event.position.x);
+
+    bool overNote = false;
+    int edge = 0;
     if (noteSequence != nullptr && ! noteSequence->empty())
+        overNote = noteAtPosition (event.position.x, event.position.y, edge) >= 0;
+
+    bool nearCurve = false;
+    if (! overNote)
     {
-        int edge = 0;
-        if (noteAtPosition (event.position.x, event.position.y, edge) >= 0)
-        {
-            if (editTool == EditTool::Cut)
-            {
-                setMouseCursor (juce::MouseCursor::CrosshairCursor);
-                return;
-            }
-            if (editTool == EditTool::Stretch && edge != 0)
-            {
-                setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
-                return;
-            }
-            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
-            return;
-        }
+        double curveSeconds = 0.0;
+        float curveMidi = 0.0f;
+        nearCurve = curvePointNear (event.position.x, event.position.y,
+                                    curveSeconds, curveMidi);
     }
-    double curveSeconds = 0.0;
-    float curveMidi = 0.0f;
-    if (curvePointNear (event.position.x, event.position.y,
-                        curveSeconds, curveMidi))
-    {
-        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
-        return;
-    }
-    setMouseCursor (juce::MouseCursor::NormalCursor);
+
+    setMouseCursor (toMouseCursor (cursorForPosition (
+        editTool, overKeyboard, nearPlayhead, overNote, edge, nearCurve)));
 }
 
 void PitchEditorComponent::rebuildWaveformCache()
@@ -909,7 +999,13 @@ void PitchEditorComponent::paint (juce::Graphics& g)
     const auto [lowestMidi, highestMidi] = visibleMidiRange();
     const int numRows = highestMidi - lowestMidi + 1;
     const float rowH = gridH / static_cast<float> (numRows);
-    const float beatW = gridW / static_cast<float> (totalBeats);
+    // Grid from the host tempo: beats are 60 / BPM seconds, bars
+    // follow the time signature (placeholder: fixed 16 beats). The
+    // beat width is seconds-based (see beatWidthValue), so beat lines
+    // and note blocks share the same x for the same time.
+    const int numBeats = displayTotalBeats();
+    const double beatsPerBarValue = displayBeatsPerBar();
+    const float beatW = beatWidthValue();
 
     g.setFont (melotheonFont (10.0f, true));
     g.setColour (Tokens::secondaryText);
@@ -928,14 +1024,27 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         return gridX + static_cast<float> (beat) * beatW;
     };
 
-    // ---- Bar numbers 1-4 across the top. ----
+    // ---- Bar numbers across the top (one per bar in the clip). ----
+    // When bars are dense, draw only every Nth number so each stays
+    // legible in a fixed-width rect: the old beat-wide rect clipped
+    // numbers to nothing at fast tempos / long clips. The last bar's
+    // number is skipped when it falls past the right edge (a partial
+    // final beat has no line there either).
+    const int numBars = activeClip != nullptr
+        ? tempoGrid.totalBars (activeClip->durationSeconds) : 4;
+    const float barSpacingPx = beatW * static_cast<float> (beatsPerBarValue);
+    const int barNumberStride = juce::jmax (1, static_cast<int> (std::ceil (
+        28.0f / juce::jmax (1.0f, barSpacingPx))));
     g.setFont (melotheonFont (12.0f, true));
     g.setColour (Tokens::secondaryText);
-    for (int bar = 0; bar < 4; ++bar)
+    for (int bar = 0; bar < numBars; bar += barNumberStride)
     {
+        const float barX = beatToX (static_cast<double> (bar) * beatsPerBarValue);
+        if (barX > gridX + gridW)
+            break;
         g.drawText (juce::String (bar + 1),
-                    juce::Rectangle<float> (beatToX (bar * beatsPerBar) + 4.0f, 0.0f,
-                                            beatW, barNumberHeight),
+                    juce::Rectangle<float> (
+                        barX + 4.0f, 0.0f, 26.0f, barNumberHeight),
                     juce::Justification::centredLeft, true);
     }
 
@@ -951,12 +1060,34 @@ void PitchEditorComponent::paint (juce::Graphics& g)
     g.drawLine (gridX, height, width, height, 1.0f);
 
     // ---- Vertical beat lines; stronger lines on bar starts. ----
-    for (int beat = 0; beat <= totalBeats; ++beat)
+    // Beat lines past the right edge (a partial final beat) are
+    // skipped: the beat width is seconds-based, so the last beat
+    // line can fall beyond the clip end.
+    for (int beat = 0; beat <= numBeats; ++beat)
     {
         const float x = beatToX (beat);
-        const bool isBar = (beat % beatsPerBar == 0);
+        if (x > gridX + gridW)
+            break;
+        const double remainder = std::fmod (
+            static_cast<double> (beat), beatsPerBarValue);
+        const bool isBar = remainder < 1e-9
+                        || beatsPerBarValue - remainder < 1e-9;
         g.setColour (isBar ? Tokens::border.withAlpha (0.8f) : Tokens::gridLine);
             g.drawLine (x, gridY, x, gridY + gridH, isBar ? 1.0f : 0.5f);
+    }
+    // Bar lines that fall between beats (odd meters such as 5/8,
+    // where a bar is 2.5 quarter-note beats) are drawn separately;
+    // bar starts on whole beats are already drawn above.
+    for (int bar = 1; bar < numBars; ++bar)
+    {
+        const double barBeat = static_cast<double> (bar) * beatsPerBarValue;
+        if (std::abs (barBeat - std::round (barBeat)) < 1e-9)
+            continue;
+        const float x = beatToX (barBeat);
+        if (x > gridX + gridW)
+            break;
+        g.setColour (Tokens::border.withAlpha (0.8f));
+        g.drawLine (x, gridY, x, gridY + gridH, 1.0f);
     }
 
     if (activeClip != nullptr)
@@ -1037,9 +1168,9 @@ void PitchEditorComponent::paint (juce::Graphics& g)
             }
         }
 
-        // ---- Real confidence-weighted pitch curve. ----
-        // Each adjacent voiced frame becomes one orange segment. The
-        // alpha follows detector confidence, so uncertain edges stay
+        // ---- Real confidence-weighted pitch curve (SOURCE PITCH). ----
+        // Each adjacent voiced frame becomes one source-pitch segment.
+        // The alpha follows detector confidence, so uncertain edges stay
         // visible without looking as authoritative as stable pitch.
         // While the user drags the curve, paint the working copy so
         // the line follows the mouse; the stored analysis only changes
@@ -1071,7 +1202,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
                 const float confidence = juce::jlimit (
                     0.0f, 1.0f, 0.5f * (previous.confidence + current.confidence));
 
-                g.setColour (Tokens::brightOrange.withAlpha (0.35f + confidence * 0.65f));
+                g.setColour (sourcePitchColour.withAlpha (0.35f + confidence * 0.65f));
                 g.drawLine (x1, y1, x2, y2, 1.3f + confidence * 0.9f);
             }
         }
@@ -1205,7 +1336,7 @@ void PitchEditorComponent::paint (juce::Graphics& g)
                 }
             }
         }
-        g.setColour (Tokens::brightOrange);
+        g.setColour (sourcePitchColour);
         g.strokePath (curve, juce::PathStrokeType (1.5f));
     }
     } // else: placeholder notes / curve (hidden once a clip is loaded)
@@ -1272,6 +1403,39 @@ void PitchEditorComponent::paint (juce::Graphics& g)
         marker.lineTo (playheadX, 9.0f);
         marker.closeSubPath();
         g.fillPath (marker);
+    }
+
+    // ---- Legend: SOURCE PITCH (detected curve) vs EDITED MIDI ----
+    // (note blocks). Top-right of the grid, below the bar strip, so
+    // a time-moved note sitting away from the curve reads as two
+    // different things, not a drawing error.
+    {
+        g.setFont (melotheonFont (10.0f, true));
+        const auto& font = g.getCurrentFont();
+        const float sourceW = juce::GlyphArrangement::getStringWidth (font, sourcePitchLegendText);
+        const float editedW = juce::GlyphArrangement::getStringWidth (font, editedMidiLegendText);
+        const float swatchW = 10.0f;
+        const float swatchH = 6.0f;
+        const float gap = 4.0f;
+        const float between = 10.0f;
+        const float totalW = swatchW + gap + sourceW + between
+                           + swatchW + gap + editedW;
+        float x = width - scrollBarWidth - 6.0f - totalW;
+        const float y = gridY + 5.0f;
+        const float swatchY = y + (13.0f - swatchH) * 0.5f;
+        g.setColour (sourcePitchColour);
+        g.fillRoundedRectangle (juce::Rectangle<float> (x, swatchY, swatchW, swatchH), 1.0f);
+        x += swatchW + gap;
+        g.drawText (sourcePitchLegendText,
+                    juce::Rectangle<float> (x, y, sourceW, 13.0f),
+                    juce::Justification::centredLeft, true);
+        x += sourceW + between;
+        g.setColour (editedMidiColour);
+        g.fillRoundedRectangle (juce::Rectangle<float> (x, swatchY, swatchW, swatchH), 1.0f);
+        x += swatchW + gap;
+        g.drawText (editedMidiLegendText,
+                    juce::Rectangle<float> (x, y, editedW, 13.0f),
+                    juce::Justification::centredLeft, true);
     }
 
     // ---- Outer border. ----
