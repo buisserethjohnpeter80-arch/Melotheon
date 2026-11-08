@@ -419,11 +419,30 @@ public:
     int getUndoStackSize() const { return static_cast<int> (undoStack.size()); }
     int getRedoStackSize() const { return static_cast<int> (redoStack.size()); }
 
-    // APVTS listener (P2-8): turning SEND TO CHANNEL on auto-enables
-    // the MIDI OUT master, so the user never enables one switch and
-    // wonders why nothing streams. Only the sendToChannel change is
-    // observed, so setting midiOut here cannot loop back.
+    // APVTS listener: turning SEND TO CHANNEL on auto-enables the
+    // MIDI OUT master (P2-8), and changing the input source clears
+    // the old clip so the two sources can never mix (exclusive
+    // input source). While the source is locked by voice detection,
+    // a change away from LIVE INPUT is reverted. See parameterChanged
+    // in the .cpp.
     void parameterChanged (const juce::String& parameterID, float newValue) override;
+
+    // Voice auto-detection (message thread only, called by the
+    // editor's timer): if a voice was detected on the input bus
+    // while the plugin was still undecided (no clip, no manual
+    // source choice), force the source to LIVE INPUT and lock it
+    // for the session. Never switches or clears anything once the
+    // user has a clip or has chosen a source. The detection itself
+    // runs on the audio thread (see updateVoiceDetection); this
+    // only applies it. Detection can only happen while audio flows,
+    // i.e. while the FL transport is playing — at load time the
+    // plugin cannot know whether the track has a voice.
+    void pollVoiceDetection();
+    bool isVoiceDetected() const
+    {
+        return voiceDetectedFlag.load (std::memory_order_acquire);
+    }
+    bool isInputSourceLocked() const { return voiceDetectionLocked; }
 
     // Host tempo (BPM + time signature + PPQ), the single source of
     // truth for the piano-roll grid and for MIDI export. refreshHostTempo()
@@ -467,6 +486,35 @@ private:
     // Cancel in-flight work and remove the curve associated with the
     // previous clip. Message thread only.
     void clearPitchAnalysis();
+
+    // Clear the active clip + analysis + melody + undo history (the
+    // same path a project load with no clip takes). Message thread
+    // only. Used by the input-source switch and by
+    // applyRestoredProject, so there is exactly one clip-clearing
+    // path.
+    void clearActiveClip();
+
+    // Exclusive input source (message thread only): apply a source
+    // change — discard any in-progress take, cancel any in-flight
+    // import, stop playback and clear the clip + analysis + melody
+    // + undo history, so the two sources can never mix. A change to
+    // the already-active source is a no-op. Called from
+    // parameterChanged (directly on the message thread, deferred
+    // with callAsync otherwise).
+    void applyInputSourceChange (InputSource newSource);
+    // The message-thread half of an inputSource change: auto-detect
+    // changes are recorded only, locked changes are reverted to
+    // LIVE INPUT, and manual changes mark the source as chosen and
+    // apply the switch. Called directly on the message thread or
+    // from the deferred callAsync in parameterChanged.
+    void handleInputSourceChangeOnMessageThread (InputSource newSource);
+    // Force LIVE INPUT + lock, undecided only (see
+    // pollVoiceDetection). Message thread only.
+    void applyVoiceDetection();
+    // Voice detection (audio thread only, called from
+    // updateInputMeter with the block's raw RMS): accumulate
+    // sustained above-threshold input; see the members below.
+    void updateVoiceDetection (float blockRms, double dt);
 
     // Replace the stored melody and publish it to the live MIDI-out
     // voice (message thread only). Every melody assignment goes
@@ -583,6 +631,25 @@ private:
     NoteSegmentationSettings lastNoteSettings;
     bool pitchAnalysisEdited = false;
 
+    // Exclusive input source (message thread only): the source the
+    // last switch applied. parameterChanged compares against it so
+    // a same-source selection is a no-op and never clears the clip.
+    InputSource lastAppliedInputSource = InputSource::Imported;
+    // True once the user has decided the source: a manual dropdown
+    // change, an accepted import, or a started recording. While
+    // false (and with no clip), voice auto-detection may still
+    // force LIVE INPUT; once true, detection never switches or
+    // clears anything.
+    bool userChoseSource = false;
+    // True while the auto-detector itself is forcing the source
+    // (see applyVoiceDetection): the listener records the change
+    // only, without clearing anything or marking a user choice.
+    bool applyingAutoDetectSource = false;
+    // True once voice detection forced LIVE INPUT: the source stays
+    // locked for the session (until the plugin is closed/reloaded).
+    // Only ever set by applyVoiceDetection, never cleared.
+    bool voiceDetectionLocked = false;
+
     // Keyboard audition voice. The message thread owns the one-shot
     // mono copy; the audio thread reads it through atomics + a
     // generation bump and announces in-flight renders, so the message
@@ -618,6 +685,24 @@ private:
     std::atomic<float>* midiOutParam = nullptr;
     std::atomic<float>* sendToChannelParam = nullptr;
     std::atomic<float>* midiChannelParam = nullptr;
+    std::atomic<float>* noiseGateParam = nullptr;
+
+    // Voice auto-detection (see pollVoiceDetection / applyVoiceDetection).
+    // The audio thread accumulates sustained above-threshold input
+    // and sets voiceDetectedFlag once the rule is met; the message
+    // thread applies the lock only while the plugin is undecided.
+    // Rule: block RMS above the noiseGate-derived silence threshold
+    // (floored at -50 dB, so background noise/hum cannot lock it),
+    // accumulated over voiceDetectSustainSeconds (0.5 s) of voiced
+    // time. A single transient/click (~one block) cannot trigger it.
+    // voiceDetectSilentSeconds resets the accumulator after 2 s of
+    // continuous silence, so isolated transients never add up.
+    static constexpr double voiceDetectSustainSeconds = 0.5;
+    static constexpr double voiceDetectSilenceResetSeconds = 2.0;
+    static constexpr float voiceDetectThresholdFloorDb = -50.0f;
+    std::atomic<bool> voiceDetectedFlag { false }; // audio-thread writer
+    double voiceDetectVoicedSeconds = 0.0; // audio thread only
+    double voiceDetectSilentSeconds = 0.0; // audio thread only
 
     // Live MIDI-out immutable snapshots (P3-14: three slots, never
     // blocking). INVARIANT — a free slot always exists: the audio
