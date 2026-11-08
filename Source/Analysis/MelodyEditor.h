@@ -3,14 +3,13 @@
 // functions over MelodyNoteSequence — no GUI, no audio thread, no
 // JUCE — so the transforms are tested without a plugin window.
 //
-// Beat geometry: the piano roll draws exactly 16 display beats across
-// the clip (see PitchEditorComponent::totalBeats), so one beat is
-// durationSeconds / 16. Moves snap to that grid, consistently with
-// what is drawn. The snap itself only needs the clip duration; the
-// BPM only decides which beat the grid represents, and the grid is
-// drawn from the duration, so no host BPM is needed here. (MIDI
-// export, which maps time to musical beats, uses the host BPM with a
-// 120 BPM fallback — see MidiExporter.)
+// Beat geometry: the piano roll grid comes from the HOST tempo (see
+// TempoGrid: one beat is 60 / BPM seconds, bars from the time
+// signature). Moves snap to that grid, consistently with what is
+// drawn. The snap takes the beat length in seconds, so a BPM change
+// moves the snap targets without moving the notes (times are stored
+// in seconds). (MIDI export, which maps time to musical beats, uses
+// the same host BPM with a 120 BPM fallback — see MidiExporter.)
 
 #pragma once
 
@@ -22,8 +21,8 @@
 
 namespace MelodyEditor
 {
-    // Display beats shown across the clip (must match the piano roll).
-    inline constexpr double kDisplayBeats = 16.0;
+    // Beat length in seconds comes from the host tempo grid
+    // (TempoGrid::beatSeconds): one beat is 60 / BPM seconds.
 
     // Smallest note a manual edit may produce (seconds). Matches the
     // stretch minimum used by the editor.
@@ -33,8 +32,9 @@ namespace MelodyEditor
     // moves in pitch, the underlying pitch frames in that note's time
     // range move by the same delta (centre = original note centre,
     // target = new pitch, window = original note duration), so the
-    // orange curve and the note blocks stay in sync. Time-only moves
-    // leave it inactive — the recorded audio stays where it was.
+    // green source-pitch curve and the note blocks stay in sync.
+    // Time-only moves leave it inactive — the recorded audio stays
+    // where it was.
     struct PitchShift
     {
         bool active = false;
@@ -43,44 +43,45 @@ namespace MelodyEditor
         double windowSeconds = 0.15;
     };
 
-    inline double secondsToDisplayBeat (double seconds, double durationSeconds)
+    inline double secondsToBeat (double seconds, double beatSeconds)
     {
-        if (durationSeconds <= 0.0)
+        if (beatSeconds <= 0.0)
             return 0.0;
-        return kDisplayBeats * seconds / durationSeconds;
+        return seconds / beatSeconds;
     }
 
-    inline double displayBeatToSeconds (double beat, double durationSeconds)
+    inline double beatToSeconds (double beat, double beatSeconds)
     {
-        if (durationSeconds <= 0.0)
+        if (beatSeconds <= 0.0)
             return 0.0;
-        return beat * durationSeconds / kDisplayBeats;
+        return beat * beatSeconds;
     }
 
-    // Snap a time to the nearest display beat; unchanged when no
-    // duration is known.
-    inline double snapSecondsToDisplayBeat (double seconds, double durationSeconds)
+    // Snap a time to the nearest beat; unchanged when no duration or
+    // no beat length is known.
+    inline double snapSecondsToBeat (double seconds, double beatSeconds,
+                                     double durationSeconds)
     {
-        if (durationSeconds <= 0.0)
+        if (durationSeconds <= 0.0 || beatSeconds <= 0.0)
             return seconds;
-        const double beat = std::round (secondsToDisplayBeat (seconds, durationSeconds));
-        return std::clamp (displayBeatToSeconds (beat, durationSeconds),
+        const double beat = std::round (secondsToBeat (seconds, beatSeconds));
+        return std::clamp (beatToSeconds (beat, beatSeconds),
                            0.0, durationSeconds);
     }
 
-    // Snap to the nearest display beat only when the time is already
-    // within toleranceBeats of it (used by CUT, so an off-grid click
-    // keeps its exact time instead of jumping to a beat).
-    inline double snapSecondsToDisplayBeatIfClose (double seconds,
-                                                   double durationSeconds,
-                                                   double toleranceBeats = 0.25)
+    // Snap to the nearest beat only when the time is already within
+    // toleranceBeats of it (used by CUT, so an off-grid click keeps
+    // its exact time instead of jumping to a beat).
+    inline double snapSecondsToBeatIfClose (double seconds, double beatSeconds,
+                                            double durationSeconds,
+                                            double toleranceBeats = 0.25)
     {
-        if (durationSeconds <= 0.0)
+        if (durationSeconds <= 0.0 || beatSeconds <= 0.0)
             return seconds;
-        const double beat = secondsToDisplayBeat (seconds, durationSeconds);
+        const double beat = secondsToBeat (seconds, beatSeconds);
         const double nearest = std::round (beat);
         if (std::abs (beat - nearest) <= toleranceBeats)
-            return std::clamp (displayBeatToSeconds (nearest, durationSeconds),
+            return std::clamp (beatToSeconds (nearest, beatSeconds),
                                0.0, durationSeconds);
         return seconds;
     }
