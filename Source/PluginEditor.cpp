@@ -246,7 +246,17 @@ public:
         : dragRow ("DRAG MIDI TO FL", fontSizeToUse),
           exportRow ("EXPORT MIDI", fontSizeToUse),
           rowHeight (rowHeightToUse),
-          captionHeight (juce::jmax (16, rowHeightToUse / 2))
+          captionHeight (juce::jmax (16, rowHeightToUse / 2)),
+          // The guide is 5 lines, but its height must come from the
+          // font that actually renders: getLabelFont ignores the
+          // label's own font and returns Tokens::labelSize (13 pt),
+          // so the old fontSizeToUse * 0.75 sizing (9.75 pt) made
+          // the label ~58 px tall while 5 lines at 13 pt need ~75 px
+          // and drawFittedText silently shrank the text.
+          guideHeight (5 * static_cast<int> (std::ceil (
+              melotheon::melotheonFont (melotheon::Tokens::labelSize)
+                  .getHeight())) + 8),
+          statusHeight (18)
     {
         // A caption under the rows, visible before any click, so the
         // user knows the drag row must be pressed and dragged - a
@@ -257,7 +267,31 @@ public:
         captionLabel.setColour (juce::Label::textColourId,
                                 melotheon::Tokens::secondaryText);
         captionLabel.setFont (melotheon::melotheonFont (fontSizeToUse * 0.75f, false));
-        setSize (widthToUse, rowHeightToUse * 2 + captionHeight + 12);
+        // Routing guide (P2-9): SEND TO CHANNEL streams MIDI through
+        // a port during preview — it does not put notes directly in
+        // the Piano Roll (DRAG MIDI / EXPORT MIDI do that), so the
+        // user must route the port first. Short lines: the panel is
+        // 258 px wide at base size.
+        guideLabel.setText (
+            juce::String (MelotheonAudioProcessorEditor::midiRoutingGuideHeadline) + "\n"
+            + MelotheonAudioProcessorEditor::midiRoutingGuidePorts1 + "\n"
+            + MelotheonAudioProcessorEditor::midiRoutingGuidePorts2 + "\n"
+            + MelotheonAudioProcessorEditor::midiRoutingGuideDirect1 + "\n"
+            + MelotheonAudioProcessorEditor::midiRoutingGuideDirect2,
+            juce::dontSendNotification);
+        guideLabel.setJustificationType (juce::Justification::centred);
+        guideLabel.setColour (juce::Label::textColourId,
+                              melotheon::Tokens::secondaryText);
+        // States the font that actually renders: getLabelFont ignores
+        // the label's own font and returns Tokens::labelSize (13 pt).
+        guideLabel.setFont (melotheon::melotheonFont (
+            melotheon::Tokens::labelSize, false));
+        // Live MIDI status (P2-10), updated by the editor's timer.
+        midiStatusLabel.setJustificationType (juce::Justification::centred);
+        midiStatusLabel.setFont (melotheon::melotheonFont (fontSizeToUse * 0.9f, true));
+        setMidiStatus (MelotheonAudioProcessor::MidiOutStatus::Off);
+        setSize (widthToUse, rowHeightToUse * 2 + captionHeight + guideHeight
+                             + statusHeight + 16);
         dragRow.setDraggable (true);
         dragRow.onClickHint = [this]
         {
@@ -296,6 +330,36 @@ public:
         addAndMakeVisible (dragRow);
         addAndMakeVisible (exportRow);
         addAndMakeVisible (captionLabel);
+        addAndMakeVisible (guideLabel);
+        addAndMakeVisible (midiStatusLabel);
+    }
+
+    // Live MIDI status (P2-10), called by the editor's timer while
+    // the panel is open. Only updates the label when the text changes.
+    void setMidiStatus (MelotheonAudioProcessor::MidiOutStatus status)
+    {
+        juce::String text;
+        juce::Colour colour = melotheon::Tokens::secondaryText;
+        switch (status)
+        {
+            case MelotheonAudioProcessor::MidiOutStatus::Waiting:
+                text = "WAITING FOR PLAY";
+                break;
+            case MelotheonAudioProcessor::MidiOutStatus::Streaming:
+                text = "STREAMING MIDI";
+                colour = melotheon::Tokens::statusGreen;
+                break;
+            case MelotheonAudioProcessor::MidiOutStatus::Off:
+            default:
+                text = "MIDI OUT OFF";
+                break;
+        }
+        if (text != lastMidiStatusText)
+        {
+            lastMidiStatusText = text;
+            midiStatusLabel.setText (text, juce::dontSendNotification);
+            midiStatusLabel.setColour (juce::Label::textColourId, colour);
+        }
     }
 
     std::function<void()> onExportMidi;
@@ -319,14 +383,23 @@ public:
         dragRow.setBounds (pad, pad, w, rowHeight);
         exportRow.setBounds (pad, pad + rowHeight, w, rowHeight);
         captionLabel.setBounds (pad, pad + rowHeight * 2 + 2, w, captionHeight);
+        guideLabel.setBounds (pad, pad + rowHeight * 2 + captionHeight + 4,
+                              w, guideHeight);
+        midiStatusLabel.setBounds (pad, pad + rowHeight * 2 + captionHeight
+                                       + guideHeight + 6, w, statusHeight);
     }
 
 private:
     MidiPanelRow dragRow;
     MidiPanelRow exportRow;
     juce::Label captionLabel;
+    juce::Label guideLabel;
+    juce::Label midiStatusLabel;
+    juce::String lastMidiStatusText;
     int rowHeight;
     int captionHeight;
+    int guideHeight;
+    int statusHeight;
 };
 } // namespace
 
@@ -495,6 +568,10 @@ MelotheonAudioProcessorEditor::MelotheonAudioProcessorEditor (MelotheonAudioProc
         if (edited != nullptr)
             audioProcessor.commitMelodyEdit (*edited, pitchShift);
     };
+    // Undo / redo (P1-7): the buttons in the piano-roll bar strip.
+    // The processor owns the history; the buttons only request it.
+    pitchEditor.onUndoRequested = [this] { audioProcessor.undoEdit(); };
+    pitchEditor.onRedoRequested = [this] { audioProcessor.redoEdit(); };
 
     // ---- Right instrument panel ----
     addAndMakeVisible (instrumentLabel);
@@ -824,6 +901,10 @@ void MelotheonAudioProcessorEditor::openMidiPanel()
     const int rowHeight = buttonBounds.getHeight();
     auto panel = std::make_unique<MidiActionPanel> (
         buttonBounds.getWidth(), rowHeight, 13.0f * scaleFactor);
+    // Track the panel itself (P2-10): the editor's timer updates its
+    // MIDI status label while it is open. The SafePointer goes null
+    // when the CallOutBox deletes the panel on dismiss.
+    midiPanel = panel.get();
 
     juce::Component::SafePointer<MelotheonAudioProcessorEditor> safeEditor (this);
     panel->onExportMidi = [safeEditor]
@@ -952,6 +1033,26 @@ void MelotheonAudioProcessorEditor::updateKeyLabel()
     }
 }
 
+bool MelotheonAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+    // P1-7 keyboard shortcuts (bonus): Ctrl/Cmd+Z undo, Ctrl/Cmd+Y
+    // or Ctrl/Cmd+Shift+Z redo. The UNDO / REDO buttons are the
+    // reliable path — the host may not forward keys to the plugin at
+    // all. An empty stack consumes nothing, so the key bubbles on.
+    const auto mods = key.getModifiers();
+    if (! (mods.isCtrlDown() || mods.isCommandDown()))
+        return false;
+    if (key.getKeyCode() == 'z' || key.getKeyCode() == 'Z')
+    {
+        if (mods.isShiftDown())
+            return audioProcessor.redoEdit();
+        return audioProcessor.undoEdit();
+    }
+    if (key.getKeyCode() == 'y' || key.getKeyCode() == 'Y')
+        return audioProcessor.redoEdit();
+    return false;
+}
+
 void MelotheonAudioProcessorEditor::timerCallback()
 {
     using namespace melotheon;
@@ -974,6 +1075,15 @@ void MelotheonAudioProcessorEditor::timerCallback()
     if (activeHintText.isNotEmpty()
         && juce::Time::getCurrentTime() < hintExpiry)
         displayStatusText = activeHintText;
+    else
+    {
+        // P2-9: the routing instruction while SEND TO CHANNEL is
+        // armed but nothing is playing yet. Below transient hints,
+        // above the normal status text.
+        const juce::String routingHint = audioProcessor.getMidiRoutingHint();
+        if (routingHint.isNotEmpty())
+            displayStatusText = routingHint;
+    }
     if (displayStatusText != lastStatusText)
     {
         lastStatusText = displayStatusText;
@@ -1016,6 +1126,33 @@ void MelotheonAudioProcessorEditor::timerCallback()
         lastMelodyNotesVersionSeen = melodyNotesVersion;
         displayedNotes = audioProcessor.getMelodyNotes();
         pitchEditor.setNoteSequence (displayedNotes);
+    }
+
+    // ---- Undo / redo buttons (P1-7) + MIDI panel status (P2-10). ----
+    const int historyVersion = audioProcessor.getEditHistoryVersion();
+    if (historyVersion != lastEditHistoryVersionSeen)
+    {
+        lastEditHistoryVersionSeen = historyVersion;
+        pitchEditor.setUndoRedoEnabled (audioProcessor.canUndoEdit(),
+                                        audioProcessor.canRedoEdit());
+    }
+    if (midiPanel != nullptr)
+    {
+        if (auto* panel = dynamic_cast<MidiActionPanel*> (midiPanel.getComponent()))
+            panel->setMidiStatus (audioProcessor.getMidiOutStatus());
+    }
+
+    // ---- Host tempo: the piano-roll grid follows FL's BPM and time
+    // signature. refreshHostTempo() reads the playhead (cheap, and
+    // processBlock() refreshes it too); the grid only updates when
+    // the tempo actually changed, so notes never move — only the
+    // grid lines and snap targets do.
+    audioProcessor.refreshHostTempo();
+    const int tempoVersion = audioProcessor.getTempoVersion();
+    if (tempoVersion != lastTempoVersionSeen)
+    {
+        lastTempoVersionSeen = tempoVersion;
+        pitchEditor.setTempoGrid (audioProcessor.getTempoGrid());
     }
 
     const int instrumentVersion = audioProcessor.getInstrumentVersion();
