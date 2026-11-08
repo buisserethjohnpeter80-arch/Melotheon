@@ -45,7 +45,7 @@ juce_add_plugin(Melotheon
     DESCRIPTION "Melotheon audio-to-MIDI melody capture for FL Studio"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
-    NEEDS_MIDI_OUTPUT FALSE
+    NEEDS_MIDI_OUTPUT TRUE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
@@ -71,6 +71,7 @@ target_sources(Melotheon
         Source/Analysis/NoteSegmenter.cpp
         Source/Analysis/PitchAnalysisEngine.cpp
         Source/Midi/MidiExporter.cpp
+        Source/Project/ProjectState.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp
@@ -141,6 +142,7 @@ target_sources(MelotheonTests
         Source/Analysis/NoteSegmenter.cpp
         Source/Analysis/PitchAnalysisEngine.cpp
         Source/Midi/MidiExporter.cpp
+        Source/Project/ProjectState.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp

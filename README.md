@@ -123,6 +123,30 @@ MIDI notes. The same note sequence powers these features:
   The status LCD notes "CURVE EDITED - RE-ANALYZE TO RESET": a later
   RE-ANALYZE overwrites manual edits. The grey waveform is the
   recorded audio and is never editable.
+- **Manual note editing (MOVE / CUT / STRETCH):** every orange note
+  block is editable with the tool strip in the piano roll (MOVE is the
+  default). MOVE drags a block to any pitch (semitone snap) or any
+  time (snapped to the beat grid, 16 beats across the clip); a pitch
+  move also shifts the underlying pitch frames, so the curve and the
+  notes stay in sync, while a time-only move leaves the recorded audio
+  where it was. CUT splits a block in two at the click (snapped to the
+  beat when close); STRETCH drags a block's left or right edge to
+  lengthen or shorten it (duration only, minimum 0.03 s). The note
+  name shows in the note LCD while dragging. Edits commit on release
+  and the edited melody is what EXPORT MIDI, DRAG MIDI and PLAY
+  INSTRUMENT use. The status LCD notes "MELODY EDITED - RE-ANALYZE TO
+  RESET": a later RE-ANALYZE overwrites note edits.
+- **SEND TO CHANNEL (live MIDI out):** turn on MIDI OUT and SEND TO
+  CHANNEL, pick a channel (CHANNEL 1-16), then press PLAY ORIGINAL or
+  PLAY INSTRUMENT: the current melody streams as MIDI note-on/off to
+  FL Studio in time with the playhead, on the selected channel. In FL
+  Studio, route the plugin's MIDI output port to the target
+  instrument's input port: in the Channel Rack, select the Melotheon
+  channel, open the Channel settings (the gear / wrench icon), set its
+  MIDI Output port to a free number (for example 1), then open the
+  target instrument's Channel settings and set its MIDI Input port to
+  the same number. Note-offs are sent on stop, melody change and
+  channel change, so no note can stick.
 - **Load Sound:** the folder button in INSTRUMENT loads a WAV, AIFF,
   FLAC or supported MP3 one-shot. Melotheon detects its root pitch,
   renders the sung timing with that sound off the audio thread and lets
@@ -132,11 +156,8 @@ MIDI notes. The same note sequence powers these features:
 
 ## What is NOT implemented yet
 
-- Direct note-block dragging (notes follow the corrected pitch curve,
-  but blocks themselves cannot be moved or resized with the mouse).
 - Third-party instrument hosting, choir generation, voice multiplication.
 - AI / ONNX models.
-- Real SEND TO CHANNEL and live MIDI output routing.
 
 ## Build (Windows, GitHub Actions)
 

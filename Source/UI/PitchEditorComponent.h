@@ -24,8 +24,11 @@
 #include <vector>
 
 #include "../Audio/AudioClip.h"
+#include "../Analysis/MelodyEditor.h"
 #include "../Analysis/MelodyNotes.h"
 #include "../Analysis/PitchAnalysis.h"
+#include "../Analysis/TempoGrid.h"
+#include "MelotheonLookAndFeel.h"
 
 class PitchEditorComponent : public juce::Component,
                              private juce::ScrollBar::Listener
@@ -38,6 +41,13 @@ public:
     // placeholder view. The waveform peak cache is rebuilt here, so
     // paint() never scans audio.
     void setClip (std::shared_ptr<const AudioClip> clip);
+
+    // Host tempo grid (BPM + time signature, from the processor).
+    // The grid lines, bar numbers and MOVE/CUT/STRETCH snap targets
+    // follow it; notes stay in seconds, so a BPM change never moves
+    // them. The placeholder view (no clip) keeps its fixed 16-beat
+    // grid regardless of the tempo.
+    void setTempoGrid (const TempoGrid& grid);
 
     // Install/clear the immutable worker result. The pitch range is
     // fitted automatically while preserving the same piano-roll style.
@@ -68,13 +78,74 @@ public:
     std::function<void()> onAuditionStop;
 
     // Manual pitch-curve correction (message thread). While the user
-    // drags the orange curve, onCurveEditNote reports the quantized
+    // drags the green source-pitch curve, onCurveEditNote reports the quantized
     // semitone under the mouse (the editor shows it in the note LCD).
     // On release, onCurveEditCommitted hands the edited analysis to
     // the editor, which commits it to the processor (re-segmentation
     // + instrument re-render). The grey waveform is never editable.
     std::function<void (int)> onCurveEditNote; // quantized MIDI note
     std::function<void (std::shared_ptr<PitchAnalysisResult>)> onCurveEditCommitted;
+
+    // Note-edit tools (MOVE / CUT / STRETCH strip in the bar-number
+    // strip). MOVE is the default. The selected tool is highlighted
+    // orange; the tool only changes how clicks inside a note block
+    // behave — the playhead, keyboard audition and curve drag keep
+    // their existing priority.
+    enum class EditTool { Move, Cut, Stretch };
+    EditTool getEditTool() const { return editTool; }
+    void setEditTool (EditTool tool);
+
+    // Undo / redo of melody + curve edits (P1-7): two small buttons
+    // left of the tool strip, same dark tokens. Disabled (greyed)
+    // when the corresponding stack is empty; the editor polls
+    // setUndoRedoEnabled() from its timer. The buttons are the
+    // reliable path (keyboard shortcuts are a bonus in the editor).
+    std::function<void()> onUndoRequested;
+    std::function<void()> onRedoRequested;
+    void setUndoRedoEnabled (bool canUndo, bool canRedo);
+
+    // Grid / playhead x-mapping: pure and unit-testable, like
+    // cursorForPosition. A beat line and a note at the same time
+    // must share the same x (beatToXValue(secondsToBeat(t)) ==
+    // playheadXForSeconds(t)); the seconds-based beat width is
+    // what guarantees it.
+    float playheadXForSeconds (double seconds) const;
+    float beatToXValue (double beat) const;
+
+    // Cursor decision (P2-12): pure and unit-testable. Priority is
+    // keyboard, then playhead, then note block, then curve. The
+    // curve-edit cursor (UpDownResize) is offered ONLY in MOVE mode:
+    // in CUT / STRETCH a click on the curve does nothing, so the
+    // cursor must not promise it.
+    enum class GridCursor { Normal, PointingHand, LeftRightResize, Crosshair, DraggingHand, UpDownResize };
+    static GridCursor cursorForPosition (EditTool tool, bool overKeyboard,
+                                         bool nearPlayhead, bool overNote,
+                                         int noteEdge, bool nearCurve);
+    static juce::MouseCursor toMouseCursor (GridCursor cursor);
+
+    // SOURCE PITCH vs EDITED MIDI (P2-11): the detected pitch curve
+    // is the recorded audio (the source), the note blocks are the
+    // musical result (the edited MIDI). Distinct colours from the
+    // existing Tokens palette, so a time-moved note sitting away
+    // from the curve reads as two different things, not a drawing
+    // error. The curve keeps its draggable behaviour in MOVE mode;
+    // only its colour changes.
+    static inline const juce::Colour sourcePitchColour = melotheon::Tokens::meterGreen;
+    static inline const juce::Colour editedMidiColour = melotheon::Tokens::activeOrange;
+    static constexpr const char* sourcePitchLegendText = "SOURCE PITCH";
+    static constexpr const char* editedMidiLegendText = "EDITED MIDI";
+
+    // Manual note editing (message thread). While the user drags a
+    // note block, onNoteEditNote reports the semitone under the mouse
+    // (the editor shows it in the note LCD). On release,
+    // onNoteEditCommitted hands the edited sequence to the editor,
+    // which commits it to the processor (melody replace + instrument
+    // re-render). The pitchShift travels with a pitch move so the
+    // underlying pitch frames move with the note; it is inactive for
+    // time-only moves and stretches. CUT commits immediately on click.
+    std::function<void (int)> onNoteEditNote; // quantized MIDI note
+    std::function<void (std::shared_ptr<MelodyNoteSequence>,
+                        const MelodyEditor::PitchShift&)> onNoteEditCommitted;
 
     // False while recording: the playhead cannot be grabbed then.
     // The editor updates this from its timer.
@@ -108,8 +179,12 @@ private:
     static constexpr int defaultHighestMidi = 72; // C5
     static constexpr int absoluteLowestMidi = 24; // C1
     static constexpr int absoluteHighestMidi = 108; // C8
-    static constexpr int totalBeats = 16; // 4 bars x 4 beats
-    static constexpr int beatsPerBar = 4;
+    // Placeholder grid (no clip loaded): 4 bars x 4 beats. With a
+    // clip, the grid comes from the host tempo (see displayTotalBeats
+    // / displayBeatsPerBar): beats are 60 / BPM seconds and bars
+    // follow the time signature.
+    static constexpr int placeholderTotalBeats = 16;
+    static constexpr double placeholderBeatsPerBar = 4.0;
     static constexpr float keyboardWidth = 94.0f;
     static constexpr float barNumberHeight = 26.0f;
     static constexpr float scrollBarWidth = 13.0f;
@@ -130,9 +205,17 @@ private:
 
     // Playhead drag geometry (same constants as paint(), so the
     // grabbed line and the drawn line always agree).
-    float playheadXForSeconds (double seconds) const;
     double secondsForX (float x) const; // -1 when no clip is loaded
     bool isNearPlayhead (float x) const;
+
+    // Grid geometry from the host tempo (see TempoGrid). With a clip
+    // loaded, beats are 60 / BPM seconds and bars follow the time
+    // signature; without a clip, the fixed 16-beat placeholder grid
+    // applies. beatLengthSeconds() is the snap unit for MOVE / CUT /
+    // STRETCH.
+    int displayTotalBeats() const;
+    double displayBeatsPerBar() const;
+    double beatLengthSeconds() const { return tempoGrid.beatSeconds(); }
 
     // Curve / keyboard geometry (same constants as paint()).
     float rowHeightValue() const;
@@ -150,6 +233,26 @@ private:
     // accumulate). No-op when no curve drag is active.
     void applyCurveDragAt (float x, float y);
 
+    // Note-block geometry (same constants as paint(), so the grabbed
+    // block and the drawn block always agree).
+    float beatWidthValue() const;
+    juce::Rectangle<float> noteBlockRect (const MelodyNote& note) const;
+    // Index of the note block under (x, y), or -1. In STRETCH mode
+    // edgeOut is -1 (left edge) / +1 (right edge) / 0 (body); in
+    // other modes it is always 0. Later notes are drawn over earlier
+    // ones, so the topmost match wins.
+    int noteAtPosition (float x, float y, int& edgeOut) const;
+    // Clip duration for beat snapping (the sequence duration when
+    // available, else the clip's).
+    double sequenceDurationSeconds() const;
+    // Apply the current note drag at a mouse position (recomputed
+    // from the drag-start snapshot every move). No-op when no note
+    // drag is active.
+    void applyNoteDragAt (float x, float y);
+    // Split the note at the click position (CUT tool): commits
+    // immediately. No-op when the click is too close to an edge.
+    void cutNoteAt (int noteIndex, float x);
+
     // Half-width of the smooth edit window around the grab point.
     static constexpr double curveEditWindowSeconds = 0.15;
     // Grab tolerance for the orange curve, in pixels.
@@ -163,6 +266,7 @@ private:
     std::shared_ptr<const PitchAnalysisResult> pitchAnalysis;
     std::shared_ptr<const MelodyNoteSequence> noteSequence;
     std::vector<std::pair<float, float>> waveformPeaks;
+    TempoGrid tempoGrid; // host tempo (120 BPM / 4-4 until the host provides one)
     double playheadSeconds = -1.0;
     float analysisProgress = -1.0f;
     bool seekEnabled = true;
@@ -180,9 +284,41 @@ private:
     std::shared_ptr<const PitchAnalysisResult> dragCurveOriginal;
     std::shared_ptr<PitchAnalysisResult> dragCurveEdited;
 
+    // Manual note drag (MOVE / STRETCH): the sequence snapshot at
+    // grab time and the working copy that follows the mouse. paint()
+    // draws the working copy while a drag is active; the processor
+    // only sees it on mouseUp (commit). CUT commits immediately and
+    // never starts a drag.
+    EditTool editTool = EditTool::Move;
+    bool draggingNote = false;
+    int dragNoteIndex = -1;
+    int dragNoteEdge = 0; // -1 = left edge, 0 = body, +1 = right edge
+    double dragNoteGrabOffsetSeconds = 0.0;
+    std::shared_ptr<const MelodyNoteSequence> dragNoteOriginal;
+    std::shared_ptr<MelodyNoteSequence> dragNoteEdited;
+
     juce::TextButton zoomOutButton { "-" };
     juce::TextButton fitButton { "FIT" };
     juce::TextButton zoomInButton { "+" };
+    // Smaller text-button font for the MOVE/CUT/STRETCH strip: the
+    // default 15 pt button font is too wide for three labels in the
+    // bar-number strip. Derives from the app look-and-feel so only
+    // the font changes. Declared before the tool buttons so it is
+    // destroyed after them.
+    class SmallToolButtonLookAndFeel : public MelotheonLookAndFeel
+    {
+    public:
+        juce::Font getTextButtonFont (juce::TextButton&, int) override
+        {
+            return melotheon::melotheonFont (11.0f, true);
+        }
+    };
+    SmallToolButtonLookAndFeel smallToolButtonLookAndFeel;
+    juce::TextButton moveToolButton { "MOVE" };
+    juce::TextButton cutToolButton { "CUT" };
+    juce::TextButton stretchToolButton { "STRETCH" };
+    juce::TextButton undoButton { "UNDO" };
+    juce::TextButton redoButton { "REDO" };
     juce::ScrollBar verticalScrollBar { true };
     float verticalZoom = 1.0f;
     int fittedLowestMidi = defaultLowestMidi;
