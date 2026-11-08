@@ -29,8 +29,8 @@
 // The drag temp file is owned by the editor and deleted only after
 // the native drag ends; a plain click on the drag row shows a hint in
 // the status LCD instead of doing nothing. Piano keys audition the
-// loaded sound (built-in sine when none is loaded) and the orange
-// pitch curve is draggable for manual correction: semitone steps,
+// loaded sound (built-in sine when none is loaded) and the green
+// source-pitch curve is draggable for manual correction: semitone steps,
 // re-segmented on release, and a later RE-ANALYZE overwrites edits.
 // Each orange note block is draggable too (MOVE tool: pitch and time,
 // beat-snapped; CUT tool: click to split; STRETCH tool: drag an edge
@@ -69,6 +69,21 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+    // Keyboard shortcuts (P1-7, bonus): Ctrl/Cmd+Z undo, Ctrl/Cmd+Y
+    // or Ctrl/Cmd+Shift+Z redo. The UNDO / REDO buttons are the
+    // reliable path — the host may not forward keys to the plugin.
+    bool keyPressed (const juce::KeyPress& key) override;
+
+    // MIDI routing guide (P2-9): shown inside the MIDI chip panel.
+    // SEND TO CHANNEL streams MIDI through a port during preview —
+    // it does not put notes directly in the Piano Roll (DRAG MIDI
+    // and EXPORT MIDI do that), so the user must route the port
+    // first. Short lines: the panel is 258 px wide at base size.
+    static constexpr const char* midiRoutingGuideHeadline = "ROUTE MIDI PORT, THEN PRESS PLAY";
+    static constexpr const char* midiRoutingGuidePorts1 = "FL: Melotheon MIDI Out port =";
+    static constexpr const char* midiRoutingGuidePorts2 = "instrument MIDI In port (same no.)";
+    static constexpr const char* midiRoutingGuideDirect1 = "DRAG / EXPORT MIDI: notes";
+    static constexpr const char* midiRoutingGuideDirect2 = "straight to the Piano Roll.";
 
 private:
     void timerCallback() override;
@@ -114,6 +129,8 @@ private:
     int lastAnalysisVersionSeen = -1;
     int lastMelodyNotesVersionSeen = -1;
     int lastInstrumentVersionSeen = -1;
+    int lastTempoVersionSeen = -1;
+    int lastEditHistoryVersionSeen = -1;
     int lastStatusSeen = -1;
     juce::String lastStatusText;
     juce::String lastNoteText;
@@ -129,6 +146,10 @@ private:
 
     // Open MIDI chip panel, if any.
     juce::Component::SafePointer<juce::CallOutBox> midiCallOutBox;
+    // The panel inside the CallOutBox (P2-10): the editor updates
+    // its MIDI status label from the timer. SafePointer goes null
+    // when the panel is dismissed.
+    juce::Component::SafePointer<juce::Component> midiPanel;
 
     // MIDI drag session (editor-owned so the temp file outlives the
     // panel/row if the CallOutBox is dismissed mid-drag). The file is
