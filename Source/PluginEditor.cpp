@@ -771,6 +771,14 @@ MelotheonAudioProcessorEditor::~MelotheonAudioProcessorEditor()
 
 void MelotheonAudioProcessorEditor::startImport()
 {
+    // Exclusive input source: IMPORT AUDIO is disabled in LIVE
+    // INPUT mode (the button is greyed there too; this guard covers
+    // a chooser opened just before the source changed). The
+    // processor refuses the call as well.
+    if (audioProcessor.getInputSource()
+        != MelotheonAudioProcessor::InputSource::Imported)
+        return;
+
     if (fileChooser != nullptr)
         return; // a chooser is already open
 
@@ -1126,6 +1134,41 @@ void MelotheonAudioProcessorEditor::timerCallback()
         lastMelodyNotesVersionSeen = melodyNotesVersion;
         displayedNotes = audioProcessor.getMelodyNotes();
         pitchEditor.setNoteSequence (displayedNotes);
+    }
+
+    // ---- Voice auto-detection: apply a detected voice (force LIVE
+    // INPUT + lock) before the button states below read the source,
+    // so the buttons flip in the same tick the lock engages. The
+    // processor only applies it while undecided; afterwards this
+    // is a cheap no-op.
+    audioProcessor.pollVoiceDetection();
+
+    // ---- Exclusive input source: REC only in LIVE INPUT, IMPORT
+    // only in IMPORTED AUDIO. The source dropdown itself stays
+    // enabled (it is the switch) — unless voice detection locked
+    // it, in which case it greys out and the user cannot leave
+    // LIVE INPUT for the session. The processor already refuses the
+    // wrong call; the disabled buttons make it visible before the
+    // user clicks. Reset the transport toggles too: the processor
+    // stopped any take / playback on the switch, so a stale orange
+    // REC or PLAY toggle would lie about the transport state.
+    const int inputSourceId = static_cast<int> (audioProcessor.getInputSource());
+    if (inputSourceId != lastInputSourceSeen)
+    {
+        lastInputSourceSeen = inputSourceId;
+        const bool isLive = audioProcessor.getInputSource()
+            == MelotheonAudioProcessor::InputSource::Live;
+        recordButton.setEnabled (isLive);
+        importAudioButton.setEnabled (! isLive);
+        importFolderButton.setEnabled (! isLive);
+        recordButton.setToggleState (false, juce::dontSendNotification);
+        playButton.setToggleState (false, juce::dontSendNotification);
+    }
+    const bool inputSourceLocked = audioProcessor.isInputSourceLocked();
+    if (inputSourceLocked != lastInputSourceLockedSeen)
+    {
+        lastInputSourceLockedSeen = inputSourceLocked;
+        inputSourceBox.setEnabled (! inputSourceLocked);
     }
 
     // ---- Undo / redo buttons (P1-7) + MIDI panel status (P2-10). ----
