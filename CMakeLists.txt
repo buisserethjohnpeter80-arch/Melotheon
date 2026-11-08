@@ -71,6 +71,7 @@ target_sources(Melotheon
         Source/Analysis/NoteSegmenter.cpp
         Source/Analysis/PitchAnalysisEngine.cpp
         Source/Midi/MidiExporter.cpp
+        Source/Project/ProjectState.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp
@@ -141,6 +142,7 @@ target_sources(MelotheonTests
         Source/Analysis/NoteSegmenter.cpp
         Source/Analysis/PitchAnalysisEngine.cpp
         Source/Midi/MidiExporter.cpp
+        Source/Project/ProjectState.cpp
         Source/UI/MelotheonLookAndFeel.cpp
         Source/UI/PitchEditorComponent.cpp
         Source/UI/LevelMeterComponent.cpp
