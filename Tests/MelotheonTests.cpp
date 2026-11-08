@@ -21,8 +21,10 @@
 #include "Midi/MidiExporter.h"
 #include "PluginProcessor.h"
 
+#include <atomic>
 #include <cmath>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 namespace
@@ -1499,6 +1501,248 @@ void testLiveMidiOutScheduling()
     processor.releaseResources();
 }
 
+void testLiveMidiOutResyncProcessesWholeBlock()
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr int blockSize = 512;
+
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (sampleRate, blockSize);
+
+    // Build a clip long enough for the initial block and a replacement
+    // melody in the following block.
+    CHECK (processor.startRecording());
+    juce::AudioBuffer<float> input (2, blockSize);
+    juce::MidiBuffer ignoredMidi;
+    input.clear();
+    for (int block = 0; block < 12; ++block)
+        processor.processBlock (input, ignoredMidi);
+    processor.stopRecording();
+    CHECK (processor.getPreviewDurationSeconds() > 0.1);
+
+    auto setParam = [&] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id); param != nullptr)
+            param->setValueNotifyingHost (value);
+    };
+    setParam ("midiOut", 1.0f);
+    setParam ("sendToChannel", 1.0f);
+
+    // Both notes live entirely inside the first 11.61 ms block. The first
+    // is already active at block start; the second starts later in the same
+    // block. A resync must emit all four events, not return after note 60 on.
+    MelodyNoteSequence initial;
+    initial.durationSeconds = processor.getPreviewDurationSeconds();
+    initial.lowestMidi = 60;
+    initial.highestMidi = 62;
+    initial.notes = {
+        { 0.000, 0.004, 60, 60.0f, 0.80f, 0.95f },
+        { 0.006, 0.009, 62, 62.0f, 0.75f, 0.94f },
+    };
+    CHECK (processor.commitMelodyEdit (initial));
+    CHECK (processor.startPreview());
+
+    juce::AudioBuffer<float> output (2, blockSize);
+    juce::MidiBuffer midi;
+    output.clear();
+    processor.processBlock (output, midi);
+
+    struct Event { int sample; juce::MidiMessage message; };
+    std::vector<Event> events;
+    for (const auto metadata : midi)
+        events.push_back ({ metadata.samplePosition, metadata.getMessage() });
+
+    CHECK (events.size() == 4);
+    if (events.size() == 4)
+    {
+        CHECK (events[0].message.isNoteOn());
+        CHECK (events[0].message.getNoteNumber() == 60);
+        CHECK (events[0].sample == 0);
+        CHECK (events[1].message.isNoteOff());
+        CHECK (events[1].message.getNoteNumber() == 60);
+        CHECK (std::abs (events[1].sample - 176) <= 1); // 0.004 s
+        CHECK (events[2].message.isNoteOn());
+        CHECK (events[2].message.getNoteNumber() == 62);
+        CHECK (std::abs (events[2].sample - 264) <= 1); // 0.006 s
+        CHECK (events[3].message.isNoteOff());
+        CHECK (events[3].message.getNoteNumber() == 62);
+        CHECK (std::abs (events[3].sample - 396) <= 1); // 0.009 s
+    }
+
+    // Replace the melody while playback is running. The new short note
+    // starts and ends inside the next block. A generation resync must emit
+    // both events in that block.
+    MelodyNoteSequence replacement;
+    replacement.durationSeconds = initial.durationSeconds;
+    replacement.lowestMidi = 67;
+    replacement.highestMidi = 67;
+    replacement.notes = {
+        { 0.015, 0.020, 67, 67.0f, 0.85f, 0.96f },
+    };
+    CHECK (processor.commitMelodyEdit (replacement));
+    midi.clear();
+    output.clear();
+    processor.processBlock (output, midi);
+
+    events.clear();
+    for (const auto metadata : midi)
+        events.push_back ({ metadata.samplePosition, metadata.getMessage() });
+    CHECK (events.size() == 2);
+    if (events.size() == 2)
+    {
+        CHECK (events[0].message.isNoteOn());
+        CHECK (events[0].message.getNoteNumber() == 67);
+        CHECK (std::abs (events[0].sample - 149) <= 1);
+        CHECK (events[1].message.isNoteOff());
+        CHECK (events[1].message.getNoteNumber() == 67);
+        CHECK (std::abs (events[1].sample - 370) <= 1);
+    }
+
+    processor.stopPreview();
+    processor.releaseResources();
+}
+
+void testLiveMidiOutSeekResyncClearsOldNote()
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr int blockSize = 512;
+
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (sampleRate, blockSize);
+
+    CHECK (processor.startRecording());
+    juce::AudioBuffer<float> input (2, blockSize);
+    juce::MidiBuffer midi;
+    input.clear();
+    for (int block = 0; block < 12; ++block)
+        processor.processBlock (input, midi);
+    processor.stopRecording();
+
+    MelodyNoteSequence melody;
+    melody.durationSeconds = processor.getPreviewDurationSeconds();
+    melody.lowestMidi = 60;
+    melody.highestMidi = 64;
+    melody.notes = {
+        { 0.000, 0.040, 60, 60.0f, 0.80f, 0.95f },
+        { 0.050, 0.060, 64, 64.0f, 0.80f, 0.95f },
+    };
+    CHECK (processor.commitMelodyEdit (melody));
+    if (auto* param = processor.apvts.getParameter ("midiOut"); param != nullptr)
+        param->setValueNotifyingHost (1.0f);
+    if (auto* param = processor.apvts.getParameter ("sendToChannel"); param != nullptr)
+        param->setValueNotifyingHost (1.0f);
+
+    CHECK (processor.startPreview());
+    juce::AudioBuffer<float> output (2, blockSize);
+    output.clear();
+    midi.clear();
+    processor.processBlock (output, midi);
+
+    // Note 60 is now sounding. Seek into note 64, close enough to its end
+    // that the end also falls in the destination block.
+    processor.setPreviewPositionSeconds (0.052);
+    output.clear();
+    midi.clear();
+    processor.processBlock (output, midi);
+
+    bool stoppedOldNote = false;
+    bool startedDestinationNote = false;
+    bool stoppedDestinationNote = false;
+    for (const auto metadata : midi)
+    {
+        const auto message = metadata.getMessage();
+        if (message.isNoteOff() && message.getNoteNumber() == 60
+            && metadata.samplePosition == 0)
+            stoppedOldNote = true;
+        if (message.isNoteOn() && message.getNoteNumber() == 64
+            && metadata.samplePosition == 0)
+            startedDestinationNote = true;
+        if (message.isNoteOff() && message.getNoteNumber() == 64
+            && std::abs (metadata.samplePosition - 352) <= 1)
+            stoppedDestinationNote = true;
+    }
+    CHECK (stoppedOldNote);
+    CHECK (startedDestinationNote);
+    CHECK (stoppedDestinationNote);
+
+    processor.stopPreview();
+    processor.releaseResources();
+}
+
+void testLiveMidiOutSnapshotPublicationStress()
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr int blockSize = 64;
+
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (sampleRate, blockSize);
+
+    // About six seconds gives both threads enough overlap without making
+    // the test depend on real-time sleeping.
+    CHECK (processor.startRecording());
+    juce::AudioBuffer<float> input (2, blockSize);
+    juce::MidiBuffer midi;
+    input.clear();
+    for (int block = 0; block < 4096; ++block)
+        processor.processBlock (input, midi);
+    processor.stopRecording();
+
+    MelodyNoteSequence melody;
+    melody.durationSeconds = processor.getPreviewDurationSeconds();
+    melody.lowestMidi = 60;
+    melody.highestMidi = 60;
+    melody.notes = {
+        { 0.0, melody.durationSeconds - 0.01, 60, 60.0f, 0.8f, 0.95f },
+    };
+    CHECK (processor.commitMelodyEdit (melody));
+    if (auto* param = processor.apvts.getParameter ("midiOut"); param != nullptr)
+        param->setValueNotifyingHost (1.0f);
+    if (auto* param = processor.apvts.getParameter ("sendToChannel"); param != nullptr)
+        param->setValueNotifyingHost (1.0f);
+    CHECK (processor.startPreview());
+
+    std::atomic<bool> begin { false };
+    std::atomic<bool> invalidMidi { false };
+    std::thread audioThread ([&]
+    {
+        while (! begin.load (std::memory_order_acquire))
+            std::this_thread::yield();
+
+        for (int block = 0; block < 4096 && processor.isPreviewPlaying(); ++block)
+        {
+            juce::AudioBuffer<float> output (2, blockSize);
+            juce::MidiBuffer blockMidi;
+            output.clear();
+            processor.processBlock (output, blockMidi);
+            for (const auto metadata : blockMidi)
+            {
+                const int note = metadata.getMessage().getNoteNumber();
+                if (note < 60 || note > 71)
+                    invalidMidi.store (true, std::memory_order_release);
+            }
+            std::this_thread::yield();
+        }
+    });
+
+    begin.store (true, std::memory_order_release);
+    for (int edit = 0; edit < 1000; ++edit)
+    {
+        MelodyNoteSequence edited = melody;
+        const int note = 60 + (edit % 12);
+        edited.notes.front().midiNote = note;
+        edited.notes.front().sourceMidiPitch = static_cast<float> (note);
+        edited.lowestMidi = note;
+        edited.highestMidi = note;
+        CHECK (processor.commitMelodyEdit (edited));
+        std::this_thread::yield();
+    }
+
+    audioThread.join();
+    CHECK (! invalidMidi.load (std::memory_order_acquire));
+    processor.stopPreview();
+    processor.releaseResources();
+}
+
 } // namespace
 
 int main()
@@ -1533,6 +1777,9 @@ int main()
     testMelodyEditCommitUsesEditedMelody();
     testMelodyEditPitchShiftMovesFrames();
     testLiveMidiOutScheduling();
+    testLiveMidiOutResyncProcessesWholeBlock();
+    testLiveMidiOutSeekResyncClearsOldNote();
+    testLiveMidiOutSnapshotPublicationStress();
     testProcessorEmptyTake();
     testProcessorTransportExclusion();
 
