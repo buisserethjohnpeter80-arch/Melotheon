@@ -131,6 +131,8 @@ private:
     int lastInstrumentVersionSeen = -1;
     int lastTempoVersionSeen = -1;
     int lastEditHistoryVersionSeen = -1;
+    int lastInputSourceSeen = -1;
+    bool lastInputSourceLockedSeen = false;
     int lastStatusSeen = -1;
     juce::String lastStatusText;
     juce::String lastNoteText;
