@@ -404,10 +404,10 @@ private:
     void noteOffMidiOut (juce::MidiBuffer& midiMessages, int sampleOffset,
                          const MelodyNote& note);
     void allNotesOffMidiOut (juce::MidiBuffer& midiMessages, int sampleOffset);
-    // Message thread only: wait (bounded) until no MIDI-out render
-    // is in flight, then publish the current melody pointer to the
-    // audio thread. Mirrors waitForAuditionToFinish.
-    void waitForMidiOutToFinish();
+    // Message thread only: wait until the audio thread has released an
+    // inactive immutable snapshot slot before reusing that slot. The
+    // currently published slot is never changed in place.
+    void waitForMidiOutSlotToFinish (int slotIndex);
     void publishMidiOutSequence();
     // Reset the audio-thread MIDI-out state (prepareToPlay and
     // releaseResources, while the callback is suspended).
@@ -493,19 +493,28 @@ private:
     std::atomic<float>* sendToChannelParam = nullptr;
     std::atomic<float>* midiChannelParam = nullptr;
 
-    // Live MIDI out. The message thread owns melodyNotes and
-    // publishes its raw pointer + a generation bump; the audio
-    // thread latches the pointer and announces in-flight renders,
-    // so the message thread never replaces the sequence under it
-    // (same pattern as the audition voice).
-    std::atomic<const MelodyNoteSequence*> midiOutSequenceForAudio { nullptr };
-    std::atomic<std::uint64_t> midiOutGeneration { 0 };
-    std::atomic<int> midiOutRenderersInFlight { 0 };
+    // Live MIDI-out immutable snapshots. The message thread writes only
+    // the inactive slot, waits for that slot's previous readers to leave,
+    // then publishes the slot index with release semantics. The audio
+    // thread claims a stable slot, reads owner.get() without copying the
+    // shared_ptr, and releases the reader count after the block. Therefore
+    // an old MelodyNoteSequence stays owned until every audio reader that
+    // could still see it has finished, with no shared_ptr operations on
+    // the real-time thread.
+    struct MidiOutSnapshotSlot
+    {
+        std::shared_ptr<const MelodyNoteSequence> owner; // message-thread writes
+        std::uint64_t generation = 0;                    // immutable while published
+        std::atomic<int> readers { 0 };
+    };
+    static constexpr int midiOutSnapshotSlotCount = 2;
+    MidiOutSnapshotSlot midiOutSnapshots[midiOutSnapshotSlotCount];
+    std::atomic<int> midiOutPublishedSnapshot { 0 };
+    std::uint64_t midiOutNextGeneration = 0; // message thread only
 
     // Audio-thread-only MIDI-out state (touched in processBlock
     // only, reset in prepareToPlay/releaseResources while the
     // callback is suspended).
-    const MelodyNoteSequence* midiOutLatchedSequence = nullptr;
     std::uint64_t midiOutLatchedGeneration = 0;
     int midiOutLastChannel = -1; // 0-based, -1 = none
     double midiOutLastPosition = -1.0; // seconds, -1 = resync needed

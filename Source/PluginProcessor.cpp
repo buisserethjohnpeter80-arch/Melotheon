@@ -14,10 +14,9 @@
 
 namespace
 {
-// In-flight announcement for the audition voice and the live MIDI-out
-// voice: the message thread waits for the counter to drain before
-// replacing the sample buffer / melody sequence. Same pattern as
-// AudioPreviewEngine's RenderActivityGuard.
+// In-flight announcement for the audition voice. The message thread
+// waits for the counter to drain before replacing the sample buffer.
+// Same pattern as AudioPreviewEngine's RenderActivityGuard.
 class ActivityGuard
 {
 public:
@@ -28,6 +27,26 @@ public:
     }
 
     ~ActivityGuard()
+    {
+        counter.fetch_sub (1, std::memory_order_seq_cst);
+    }
+
+private:
+    std::atomic<int>& counter;
+};
+
+// The MIDI snapshot reader count is claimed before the slot is inspected,
+// so this guard only has to release an already-acquired reader on every
+// return path from renderMidiOut().
+class ActivityReleaseGuard
+{
+public:
+    explicit ActivityReleaseGuard (std::atomic<int>& counterToUse)
+        : counter (counterToUse)
+    {
+    }
+
+    ~ActivityReleaseGuard()
     {
         counter.fetch_sub (1, std::memory_order_seq_cst);
     }
@@ -570,33 +589,37 @@ void MelotheonAudioProcessor::publishMelodyNotes (
     std::shared_ptr<const MelodyNoteSequence> notes)
 {
     melodyNotes = std::move (notes);
-    melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
     publishMidiOutSequence();
+    melodyNotesVersion.fetch_add (1, std::memory_order_acq_rel);
 }
 
-void MelotheonAudioProcessor::waitForMidiOutToFinish()
+void MelotheonAudioProcessor::waitForMidiOutSlotToFinish (int slotIndex)
 {
-    // Bounded: the audio thread may be stopped (host idle), in which
-    // case nothing can read the sequence and waiting is pointless.
-    for (int i = 0; i < 2000; ++i)
-    {
-        if (midiOutRenderersInFlight.load (std::memory_order_seq_cst) == 0)
-            return;
-        std::this_thread::sleep_for (std::chrono::microseconds (50));
-    }
+    jassert (slotIndex >= 0 && slotIndex < midiOutSnapshotSlotCount);
+    while (midiOutSnapshots[slotIndex].readers.load (std::memory_order_seq_cst) != 0)
+        std::this_thread::yield();
 }
 
 void MelotheonAudioProcessor::publishMidiOutSequence()
 {
-    waitForMidiOutToFinish();
-    midiOutSequenceForAudio.store (melodyNotes != nullptr ? melodyNotes.get() : nullptr,
-                                   std::memory_order_seq_cst);
-    midiOutGeneration.fetch_add (1, std::memory_order_acq_rel);
+    // Double-buffer publication: never mutate or destroy the slot currently
+    // visible to the audio thread. If an older render still owns the inactive
+    // slot, wait for that specific reader only; new renders continue on the
+    // current slot and cannot extend this wait.
+    const int currentSlot = midiOutPublishedSnapshot.load (std::memory_order_acquire);
+    const int nextSlot = 1 - currentSlot;
+    waitForMidiOutSlotToFinish (nextSlot);
+
+    auto& snapshot = midiOutSnapshots[nextSlot];
+    snapshot.owner = melodyNotes;
+    snapshot.generation = ++midiOutNextGeneration;
+
+    // Publishes both owner and generation as one immutable snapshot.
+    midiOutPublishedSnapshot.store (nextSlot, std::memory_order_release);
 }
 
 void MelotheonAudioProcessor::resetMidiOutState()
 {
-    midiOutLatchedSequence = nullptr;
     midiOutLatchedGeneration = 0;
     midiOutLastChannel = -1;
     midiOutLastPosition = -1.0;
@@ -676,19 +699,33 @@ void MelotheonAudioProcessor::renderMidiOut (juce::MidiBuffer& midiMessages,
         return;
     }
 
-    ActivityGuard inFlightGuard (midiOutRenderersInFlight);
-
     const int channel = getMidiChannel() - 1; // 0-based here
-    const auto* sequence = midiOutSequenceForAudio.load (std::memory_order_seq_cst);
-    const std::uint64_t generation = midiOutGeneration.load (std::memory_order_acquire);
+
+    // Claim a stable immutable snapshot. A publication may happen between
+    // the first index load and the reader increment; the second load detects
+    // that race and retries before any slot data is inspected. Once claimed,
+    // the message thread cannot reuse this slot until the guard releases it.
+    int snapshotIndex = 0;
+    for (;;)
+    {
+        snapshotIndex = midiOutPublishedSnapshot.load (std::memory_order_acquire);
+        auto& readers = midiOutSnapshots[snapshotIndex].readers;
+        readers.fetch_add (1, std::memory_order_seq_cst);
+        if (snapshotIndex == midiOutPublishedSnapshot.load (std::memory_order_acquire))
+            break;
+        readers.fetch_sub (1, std::memory_order_seq_cst);
+    }
+
+    auto& snapshot = midiOutSnapshots[snapshotIndex];
+    ActivityReleaseGuard snapshotGuard (snapshot.readers);
+    const auto* sequence = snapshot.owner.get();
+    const std::uint64_t generation = snapshot.generation;
 
     // Melody replaced or channel changed while sending: stop every
     // sounding note on its original channel, then resync below.
-    if (generation != midiOutLatchedGeneration || sequence != midiOutLatchedSequence
-        || channel != midiOutLastChannel)
+    if (generation != midiOutLatchedGeneration || channel != midiOutLastChannel)
     {
         allNotesOffMidiOut (midiMessages, 0);
-        midiOutLatchedSequence = sequence;
         midiOutLatchedGeneration = generation;
         midiOutLastChannel = channel;
         midiOutLastPosition = -1.0;
@@ -713,28 +750,38 @@ void MelotheonAudioProcessor::renderMidiOut (juce::MidiBuffer& midiMessages,
             std::floor ((seconds - blockStartSeconds) * hostRate)));
     };
 
-    // Resync (start, seek, melody/channel change, or sending just
-    // enabled): notes containing the block start sound from offset 0.
-    if (midiOutLastPosition < 0.0
-        || std::abs (blockStartSeconds - midiOutLastPosition) > 0.005)
+    // Resync on start, seek, melody/channel change, or when sending has
+    // just been enabled. A seek must first stop notes from the old position;
+    // otherwise a note that is not active at the destination can stick.
+    const bool positionDiscontinuity = midiOutLastPosition >= 0.0
+        && std::abs (blockStartSeconds - midiOutLastPosition) > 0.005;
+    const bool resync = midiOutLastPosition < 0.0 || positionDiscontinuity;
+    if (positionDiscontinuity)
+        allNotesOffMidiOut (midiMessages, 0);
+
+    // On resync, notes already active at the block start begin at offset 0.
+    // We still process every start and end later in this same block below;
+    // returning here would lose short notes and note-offs.
+    if (resync)
     {
         for (const auto& note : sequence->notes)
         {
             if (note.startSeconds <= blockStartSeconds && note.endSeconds > blockStartSeconds)
                 noteOnMidiOut (midiMessages, 0, note, channel);
         }
-        midiOutLastPosition = blockEndSeconds;
-        return;
     }
 
-    // Continuous playback: emit the starts/ends inside
-    // (lastPosition, blockEnd]. Notes are sorted by start and never
-    // overlap, so iterating in order emits events in time order.
+    // Emit every start/end inside (windowStart, blockEnd]. During normal
+    // playback windowStart is the previous block end. During resync it is
+    // the current block start, because active notes were restored above.
+    // Notes are sorted and monophonic, so same-sample note-offs are added
+    // before the following note-on.
+    const double windowStart = resync ? blockStartSeconds : midiOutLastPosition;
     for (const auto& note : sequence->notes)
     {
-        if (note.startSeconds > midiOutLastPosition && note.startSeconds <= blockEndSeconds)
+        if (note.startSeconds > windowStart && note.startSeconds <= blockEndSeconds)
             noteOnMidiOut (midiMessages, sampleOffsetFor (note.startSeconds), note, channel);
-        if (note.endSeconds > midiOutLastPosition && note.endSeconds <= blockEndSeconds)
+        if (note.endSeconds > windowStart && note.endSeconds <= blockEndSeconds)
             noteOffMidiOut (midiMessages, sampleOffsetFor (note.endSeconds), note);
     }
     midiOutLastPosition = blockEndSeconds;
