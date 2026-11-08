@@ -779,18 +779,30 @@ void testProcessorPassThrough()
         || processor.getStatus() == MelotheonAudioProcessor::Status::NoInput);
 }
 
+// Fresh instances default to IMPORTED AUDIO (voice auto-detect
+// decides); tests that record select LIVE INPUT first. The switch
+// with nothing loaded clears nothing (no clip, no hint, no version
+// bump) — see testSameSourceSelectionIsNoOp / testProcessorEmptyTake.
+void selectLiveInput (MelotheonAudioProcessor& processor)
+{
+    if (auto* param = processor.apvts.getParameter ("inputSource"); param != nullptr)
+        param->setValueNotifyingHost (0.0f);
+}
+
 void testProcessorRecordAndPreview()
 {
     MelotheonAudioProcessor processor;
     processor.prepareToPlay (44100.0, 512);
 
-    // Default input source is LIVE INPUT.
-    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Live);
+    // Fresh instances default to IMPORTED AUDIO (voice auto-detect
+    // decides); tests that record select LIVE INPUT first.
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
     CHECK (! processor.hasActiveClip());
     CHECK (! processor.startPreview()); // nothing to play
     CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::EmptySource);
 
     // Record a short take.
+    selectLiveInput (processor);
     CHECK (processor.startRecording());
     CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::Recording);
 
@@ -844,6 +856,7 @@ void testProcessorSeek()
     CHECK (processor.getPreviewPositionSeconds() == 0.0);
 
     // Record a short take (4 blocks of 512 = 2048 samples).
+    selectLiveInput (processor);
     CHECK (processor.startRecording());
     juce::AudioBuffer<float> input (2, 512);
     juce::MidiBuffer midi;
@@ -1117,6 +1130,7 @@ void testProcessorEmptyTake()
 
     CHECK (! processor.hasActiveClip());
     CHECK (processor.getClipVersion() == 0);
+    selectLiveInput (processor);
     CHECK (processor.startRecording());
 
     // Stop before processBlock has supplied a single sample.
@@ -1139,6 +1153,7 @@ void testProcessorTransportExclusion()
     juce::MidiBuffer midi;
 
     // Create a first valid clip and begin previewing it.
+    selectLiveInput (processor);
     CHECK (processor.startRecording());
     processor.processBlock (block, midi);
     processor.stopRecording();
@@ -1369,6 +1384,7 @@ void testLiveMidiOutScheduling()
     processor.prepareToPlay (44100.0, 512);
 
     // Record a 0.51 s take (44 blocks of 512 samples).
+    selectLiveInput (processor);
     CHECK (processor.startRecording());
     juce::AudioBuffer<float> input (2, 512);
     juce::MidiBuffer midi;
@@ -1518,6 +1534,7 @@ void testLiveMidiOutResyncProcessesWholeBlock()
 
     // Build a clip long enough for the initial block and a replacement
     // melody in the following block.
+    selectLiveInput (processor);
     CHECK (processor.startRecording());
     juce::AudioBuffer<float> input (2, blockSize);
     juce::MidiBuffer ignoredMidi;
@@ -1617,6 +1634,7 @@ void testLiveMidiOutSeekResyncClearsOldNote()
     MelotheonAudioProcessor processor;
     processor.prepareToPlay (sampleRate, blockSize);
 
+    selectLiveInput (processor);
     CHECK (processor.startRecording());
     juce::AudioBuffer<float> input (2, blockSize);
     juce::MidiBuffer midi;
@@ -1687,6 +1705,7 @@ void testLiveMidiOutSnapshotPublicationStress()
 
     // About six seconds gives both threads enough overlap without making
     // the test depend on real-time sleeping.
+    selectLiveInput (processor);
     CHECK (processor.startRecording());
     juce::AudioBuffer<float> input (2, blockSize);
     juce::MidiBuffer midi;
@@ -1779,6 +1798,7 @@ struct MidiOutHarness
         const int recordBlock = recordBlockSize > 0 ? recordBlockSize : blockSize;
         const int recordBlocks = static_cast<int> (
             std::ceil (durationSeconds * sampleRate / recordBlock));
+        selectLiveInput (processor);
         CHECK (processor.startRecording());
         juce::AudioBuffer<float> input (2, recordBlock);
         juce::MidiBuffer midi;
@@ -2545,6 +2565,7 @@ void recordSineTake (MelotheonAudioProcessor& processor, double sampleRate,
                      double durationSeconds, float peak)
 {
     const int blockSize = 512;
+    selectLiveInput (processor);
     CHECK (processor.startRecording());
     juce::AudioBuffer<float> input (2, blockSize);
     juce::MidiBuffer midi;
@@ -3500,6 +3521,436 @@ void testSendToChannelAutoEnablesMidiOut()
     processor.releaseResources();
 }
 
+// ---- Exclusive input source ----
+
+juce::File writeTestToneWav (const char* fileName)
+{
+    const juce::File wavFile = getTestDir().getChildFile (fileName);
+
+    // 0.5 s stereo 44.1 kHz WAV (440 Hz sine) with the JUCE writer.
+    juce::AudioBuffer<float> source (2, 22050);
+    for (int i = 0; i < 22050; ++i)
+    {
+        const float s = 0.5f * std::sin (2.0f * 3.14159265f * 440.0f
+                                         * static_cast<float> (i) / 44100.0f);
+        source.getWritePointer (0)[i] = s;
+        source.getWritePointer (1)[i] = -s;
+    }
+    std::unique_ptr<juce::FileOutputStream> stream (wavFile.createOutputStream());
+    if (stream == nullptr)
+        return wavFile;
+    juce::WavAudioFormat format;
+    std::unique_ptr<juce::AudioFormatWriter> writer (
+        format.createWriterFor (stream.release(), 44100.0, 2, 16, {}, 0));
+    if (writer == nullptr)
+        return wavFile;
+    writer->writeFromAudioSampleBuffer (source, 0, 22050);
+    writer.reset(); // flushes and closes the file
+    return wavFile;
+}
+
+void testExclusiveInputSourceRefusals()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    auto setParam = [&] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id); param != nullptr)
+            param->setValueNotifyingHost (value);
+    };
+    const juce::File wavFile = writeTestToneWav ("exclusive-import.wav");
+    CHECK (wavFile.existsAsFile());
+
+    // Fresh instances default to IMPORTED AUDIO: import is accepted.
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+    processor.startFileImport (wavFile);
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::Loading);
+
+    // IMPORTED AUDIO mode: record is refused.
+    CHECK (! processor.startRecording());
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::Error);
+    CHECK (processor.getStatusText() == "USE LIVE INPUT");
+
+    // LIVE INPUT mode: import is refused (and the pending load is
+    // cancelled by the switch).
+    setParam ("inputSource", 0.0f);
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Live);
+    processor.startFileImport (wavFile);
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::Error);
+    CHECK (processor.getStatusText() == "USE IMPORTED AUDIO");
+    CHECK (! processor.hasActiveClip());
+
+    // Back in LIVE INPUT, record works again.
+    CHECK (processor.startRecording());
+    processor.stopRecording(); // no input fed: NoInput, harmless
+    CHECK (! processor.hasActiveClip());
+
+    processor.releaseResources();
+}
+
+void testSourceSwitchClearsClip()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    auto setParam = [&] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id); param != nullptr)
+            param->setValueNotifyingHost (value);
+    };
+
+    // Clip + analysis + melody + undo history, all from the old source.
+    recordSineTake (processor, 44100.0, 0.5, 0.5f);
+    CHECK (processor.commitPitchCurveEdit (makeTwoToneAnalysis (0.5)));
+    auto m1 = makeUndoTestMelody (60);
+    CHECK (processor.commitMelodyEdit (m1));
+    auto m2 = m1;
+    CHECK (MelodyEditor::moveNote (m2, 0, 0.25, 62, 1.5));
+    CHECK (processor.commitMelodyEdit (m2));
+    CHECK (processor.hasActiveClip());
+    CHECK (processor.getPitchAnalysis() != nullptr);
+    CHECK (processor.hasMelodyNotes());
+    CHECK (processor.isPitchAnalysisEdited());
+    CHECK (processor.canUndoEdit());
+    const int versionBefore = processor.getClipVersion();
+
+    // Switch the source: everything from the old source goes.
+    setParam ("inputSource", 1.0f);
+    CHECK (! processor.hasActiveClip());
+    CHECK (processor.getPitchAnalysis() == nullptr);
+    CHECK (! processor.hasMelodyNotes());
+    CHECK (! processor.isPitchAnalysisEdited());
+    CHECK (! processor.canUndoEdit());
+    CHECK (! processor.canRedoEdit());
+    CHECK (! processor.undoEdit());
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::EmptySource);
+    CHECK (processor.getStatusHint() == "SOURCE CHANGED - CLIP CLEARED");
+    CHECK (processor.getClipVersion() > versionBefore);
+
+    // The cleared state saves as empty: a reload must not resurrect
+    // the discarded clip.
+    juce::MemoryBlock state;
+    processor.getStateInformation (state);
+    MelotheonAudioProcessor restored;
+    restored.prepareToPlay (44100.0, 512);
+    restored.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    CHECK (! restored.hasActiveClip());
+    CHECK (restored.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+    restored.releaseResources();
+
+    processor.releaseResources();
+}
+
+void testSourceSwitchDiscardsRecordingTake()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    auto setParam = [&] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id); param != nullptr)
+            param->setValueNotifyingHost (value);
+    };
+
+    selectLiveInput (processor);
+    CHECK (processor.startRecording());
+    juce::AudioBuffer<float> input (2, 512);
+    juce::MidiBuffer midi;
+    for (int i = 0; i < 512; ++i)
+    {
+        input.getWritePointer (0)[i] = 0.3f;
+        input.getWritePointer (1)[i] = 0.3f;
+    }
+    processor.processBlock (input, midi);
+    processor.processBlock (input, midi);
+    CHECK (processor.isRecording());
+
+    // Switching mid-take discards the take: no clip appears.
+    setParam ("inputSource", 1.0f);
+    CHECK (! processor.isRecording());
+    CHECK (! processor.hasActiveClip());
+    CHECK (processor.getClipVersion() == 0);
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::EmptySource);
+
+    processor.releaseResources();
+}
+
+void testStaleImportAfterSourceSwitch()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    auto setParam = [&] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id); param != nullptr)
+            param->setValueNotifyingHost (value);
+    };
+    const juce::File wavFile = writeTestToneWav ("exclusive-stale.wav");
+
+    setParam ("inputSource", 1.0f);
+    processor.startFileImport (wavFile);
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::Loading);
+
+    // Switch while the decode is in flight: the pending load is
+    // cancelled and no stale clip may appear.
+    setParam ("inputSource", 0.0f);
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::EmptySource);
+    CHECK (! processor.hasActiveClip());
+
+    // Let the worker finish decoding. Its message-thread callback is
+    // dropped by the loader's generation guard — and this console
+    // harness has no message pump anyway (see testUndoAfterReanalyze):
+    // the re-assert proves the state stays empty once the worker has
+    // settled, and the host (FL pumps the queue) exercises the
+    // delivery half for real.
+    std::this_thread::sleep_for (std::chrono::milliseconds (500));
+    CHECK (! processor.hasActiveClip());
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::EmptySource);
+
+    processor.releaseResources();
+}
+
+void testSameSourceSelectionIsNoOp()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    auto setParam = [&] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id); param != nullptr)
+            param->setValueNotifyingHost (value);
+    };
+
+    recordSineTake (processor, 44100.0, 0.5, 0.5f);
+    CHECK (processor.hasActiveClip());
+    const int versionWithClip = processor.getClipVersion();
+
+    // Same source, driven straight through the listener: no clear.
+    processor.parameterChanged ("inputSource", 0.0f);
+    CHECK (processor.hasActiveClip());
+    CHECK (processor.getClipVersion() == versionWithClip);
+
+    // A real switch clears once...
+    setParam ("inputSource", 1.0f);
+    CHECK (! processor.hasActiveClip());
+    const int versionAfterClear = processor.getClipVersion();
+    CHECK (versionAfterClear > versionWithClip);
+
+    // ...and selecting the same source again clears nothing more.
+    setParam ("inputSource", 1.0f);
+    processor.parameterChanged ("inputSource", 1.0f);
+    CHECK (processor.getClipVersion() == versionAfterClear);
+    CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::EmptySource);
+
+    processor.releaseResources();
+}
+
+// ---- Voice auto-detection + lock ----
+
+// Feed sustained above-threshold audio through processBlock: the
+// detection rule needs ~0.5 s of voiced RMS. 0.5 amplitude sine is
+// ~-9 dB RMS, far above the -50 dB floor.
+void feedVoiceBlocks (MelotheonAudioProcessor& processor, int numBlocks,
+                      float amplitude = 0.5f)
+{
+    juce::AudioBuffer<float> input (2, 512);
+    juce::MidiBuffer midi;
+    double phase = 0.0;
+    const double phaseStep = 2.0 * 3.141592653589793 * 440.0 / 44100.0;
+    for (int b = 0; b < numBlocks; ++b)
+    {
+        for (int i = 0; i < 512; ++i)
+        {
+            const float s = amplitude * static_cast<float> (std::sin (phase));
+            phase += phaseStep;
+            input.getWritePointer (0)[i] = s;
+            input.getWritePointer (1)[i] = s;
+        }
+        processor.processBlock (input, midi);
+    }
+}
+
+void feedSilenceBlocks (MelotheonAudioProcessor& processor, int numBlocks)
+{
+    juce::AudioBuffer<float> input (2, 512);
+    input.clear();
+    juce::MidiBuffer midi;
+    for (int b = 0; b < numBlocks; ++b)
+        processor.processBlock (input, midi);
+}
+
+void testVoiceDetectionForcesLiveAndLocks()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+
+    // Undecided: fresh default IMPORTED AUDIO, nothing detected.
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+    CHECK (! processor.isVoiceDetected());
+    CHECK (! processor.isInputSourceLocked());
+
+    // ~1 s of voice on the input bus: detected, then applied.
+    feedVoiceBlocks (processor, 86);
+    CHECK (processor.isVoiceDetected());
+    processor.pollVoiceDetection();
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Live);
+    CHECK (processor.isInputSourceLocked());
+    CHECK (processor.getStatusHint() == "VOICE DETECTED - LIVE INPUT");
+
+    // The lock refuses a manual switch away from LIVE INPUT: the
+    // parameter is reverted, nothing is cleared.
+    if (auto* param = processor.apvts.getParameter ("inputSource"); param != nullptr)
+        param->setValueNotifyingHost (1.0f);
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Live);
+    CHECK (processor.isInputSourceLocked());
+
+    processor.releaseResources();
+}
+
+void testNoVoiceDefaultsImportedAndFreeChoice()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    auto setParam = [&] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id); param != nullptr)
+            param->setValueNotifyingHost (value);
+    };
+
+    // Empty track: default IMPORTED AUDIO, no detection, no lock.
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+    feedSilenceBlocks (processor, 86); // ~1 s of silence
+    CHECK (! processor.isVoiceDetected());
+    processor.pollVoiceDetection();
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+    CHECK (! processor.isInputSourceLocked());
+
+    // Free choice: the user may switch to LIVE INPUT and back.
+    setParam ("inputSource", 0.0f);
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Live);
+    CHECK (processor.startRecording());
+    processor.stopRecording(); // no input fed: NoInput, harmless
+    setParam ("inputSource", 1.0f);
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+    CHECK (! processor.isInputSourceLocked());
+    processor.pollVoiceDetection(); // a manual choice is never overridden
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+
+    processor.releaseResources();
+}
+
+void testDetectionAfterImportDoesNotSwitch()
+{
+    const juce::File wavFile = writeTestToneWav ("exclusive-detect-import.wav");
+
+    // Case 1: an import in flight. The user chose IMPORTED AUDIO
+    // by importing; a voice detected during the decode must not
+    // switch the source or cancel the import.
+    {
+        MelotheonAudioProcessor processor;
+        processor.prepareToPlay (44100.0, 512);
+        processor.startFileImport (wavFile);
+        CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::Loading);
+        feedVoiceBlocks (processor, 86);
+        CHECK (processor.isVoiceDetected());
+        processor.pollVoiceDetection();
+        CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+        CHECK (! processor.isInputSourceLocked());
+        CHECK (processor.getStatus() == MelotheonAudioProcessor::Status::Loading);
+        processor.releaseResources();
+    }
+
+    // Case 2: a clip already loaded (recorded take). Detection must
+    // not switch the source and must not clear the clip.
+    {
+        MelotheonAudioProcessor processor;
+        processor.prepareToPlay (44100.0, 512);
+        recordSineTake (processor, 44100.0, 0.5, 0.5f);
+        CHECK (processor.hasActiveClip());
+        const int versionBefore = processor.getClipVersion();
+        feedVoiceBlocks (processor, 86);
+        CHECK (processor.isVoiceDetected());
+        processor.pollVoiceDetection();
+        CHECK (processor.hasActiveClip());
+        CHECK (processor.getClipVersion() == versionBefore);
+        CHECK (! processor.isInputSourceLocked());
+        processor.releaseResources();
+    }
+}
+
+void testSingleTransientDoesNotLock()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+
+    // One loud block (a click) then 3 s of silence: no detection.
+    feedVoiceBlocks (processor, 1, 0.9f);
+    feedSilenceBlocks (processor, 260);
+    CHECK (! processor.isVoiceDetected());
+    processor.pollVoiceDetection();
+    CHECK (! processor.isInputSourceLocked());
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+
+    // Isolated transients 0.5 s apart never add up to 0.5 s voiced.
+    for (int t = 0; t < 5; ++t)
+    {
+        feedVoiceBlocks (processor, 1, 0.9f);
+        feedSilenceBlocks (processor, 43);
+    }
+    feedSilenceBlocks (processor, 260);
+    CHECK (! processor.isVoiceDetected());
+    processor.pollVoiceDetection();
+    CHECK (! processor.isInputSourceLocked());
+
+    processor.releaseResources();
+}
+
+void testLockPersistsOnceSet()
+{
+    MelotheonAudioProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    auto setParam = [&] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id); param != nullptr)
+            param->setValueNotifyingHost (value);
+    };
+
+    feedVoiceBlocks (processor, 86);
+    processor.pollVoiceDetection();
+    CHECK (processor.isInputSourceLocked());
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Live);
+
+    // Transport stopped (silence) and more voice later: the lock
+    // stays, and a manual switch is still reverted.
+    feedSilenceBlocks (processor, 260);
+    processor.pollVoiceDetection();
+    CHECK (processor.isInputSourceLocked());
+    setParam ("inputSource", 1.0f);
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Live);
+    feedVoiceBlocks (processor, 86);
+    processor.pollVoiceDetection();
+    CHECK (processor.isInputSourceLocked());
+    CHECK (processor.getInputSource() == MelotheonAudioProcessor::InputSource::Live);
+
+    processor.releaseResources();
+}
+
+void testOldProjectLiveSourceRestores()
+{
+    // An old project saved with LIVE INPUT must restore that value
+    // (the new IMPORTED default only applies to fresh instances).
+    MelotheonAudioProcessor source;
+    source.prepareToPlay (44100.0, 512);
+    recordSineTake (source, 44100.0, 0.5, 0.5f); // helper selects Live
+    juce::MemoryBlock state;
+    source.getStateInformation (state);
+    source.releaseResources();
+
+    MelotheonAudioProcessor restored;
+    restored.prepareToPlay (44100.0, 512);
+    CHECK (restored.getInputSource() == MelotheonAudioProcessor::InputSource::Imported);
+    restored.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    CHECK (restored.getInputSource() == MelotheonAudioProcessor::InputSource::Live);
+    CHECK (restored.hasActiveClip());
+    restored.releaseResources();
+}
+
 int main()
 {
     testStereoToMono();
@@ -3567,6 +4018,17 @@ int main()
     testGridMappingMatchesNotePositions();
     testProcessorEmptyTake();
     testProcessorTransportExclusion();
+    testExclusiveInputSourceRefusals();
+    testSourceSwitchClearsClip();
+    testSourceSwitchDiscardsRecordingTake();
+    testStaleImportAfterSourceSwitch();
+    testSameSourceSelectionIsNoOp();
+    testVoiceDetectionForcesLiveAndLocks();
+    testNoVoiceDefaultsImportedAndFreeChoice();
+    testDetectionAfterImportDoesNotSwitch();
+    testSingleTransientDoesNotLock();
+    testLockPersistsOnceSet();
+    testOldProjectLiveSourceRestores();
 
     // Clean up the temp files.
     getTestDir().deleteRecursively();
