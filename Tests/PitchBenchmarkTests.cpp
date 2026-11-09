@@ -20,6 +20,7 @@
 #include "Analysis/MonophonicPitchAnalyzer.h"
 #include "Analysis/NoteSegmenter.h"
 #include "PitchBenchmark.h"
+#include "RealAudioValidation.h"
 
 #include <cmath>
 #include <iomanip>
@@ -1522,6 +1523,15 @@ BenchmarkTestOutcome runPitchBenchmarkTests()
     testBenchmarkVoicingMatrix();
     testBenchmarkDatasetInterface();
     testBenchmarkReproducibilityRecord();
+
+    // Real-audio validation (separate file, own counters; folded into
+    // the suite totals exactly like the benchmark block above). When no
+    // dataset manifest is found it returns {0, 0}, so CI stays green.
+    {
+        const auto realAudioOutcome = runRealAudioValidationTests();
+        checks += realAudioOutcome.checks;
+        failures += realAudioOutcome.failures;
+    }
 
     getBenchmarkTestDir().deleteRecursively();
 
