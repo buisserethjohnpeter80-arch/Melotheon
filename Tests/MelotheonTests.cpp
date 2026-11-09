@@ -20,6 +20,7 @@
 #include "Analysis/PitchAnalysis.h"
 #include "Analysis/TempoGrid.h"
 #include "Midi/MidiExporter.h"
+#include "PitchBenchmark.h"
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "Project/ProjectState.h"
@@ -3968,6 +3969,13 @@ int main()
     testLowAndHighPitchAnalysis();
     testPitchAnalysisSilenceAndCancellation();
     testPitchCurveFollowsTwoTones();
+    // Phase 1 pitch-detection benchmark (separate file, own counters;
+    // folded into the suite totals so the exit code stays meaningful).
+    {
+        const auto benchmarkOutcome = pitchbenchmark::runPitchBenchmarkTests();
+        checks += benchmarkOutcome.checks;
+        failures += benchmarkOutcome.failures;
+    }
     testNoteSegmentationRejectsVibratoAndBridgesGap();
     testMidiExportRoundTrip();
     testMidiDragFilePreparation();
