@@ -133,6 +133,7 @@ target_sources(MelotheonTests
         Tests/MelotheonTests.cpp
         Tests/PitchBenchmark.cpp
         Tests/PitchBenchmarkTests.cpp
+        Tests/RealAudioValidation.cpp
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
         Source/Audio/AudioCaptureEngine.cpp
