@@ -233,6 +233,19 @@ juce::AudioBuffer<float> makeVibratoTone (double sampleRate,
                                           double rateHz,
                                           float amplitude)
 {
+    return makeVibratoToneWithPhase (sampleRate, durationSeconds,
+                                     centreFrequencyHz, depthSemitones,
+                                     rateHz, 0.0, amplitude);
+}
+
+juce::AudioBuffer<float> makeVibratoToneWithPhase (double sampleRate,
+                                                   double durationSeconds,
+                                                   double centreFrequencyHz,
+                                                   double depthSemitones,
+                                                   double rateHz,
+                                                   double phaseRadians,
+                                                   float amplitude)
+{
     const int samples = static_cast<int> (std::llround (sampleRate * durationSeconds));
     juce::AudioBuffer<float> buffer (1, std::max (1, samples));
     double phase = 0.0;
@@ -241,7 +254,7 @@ juce::AudioBuffer<float> makeVibratoTone (double sampleRate,
         const double time = static_cast<double> (i) / sampleRate;
         const double instantaneous = centreFrequencyHz
             * std::pow (2.0, depthSemitones
-                             * std::sin (kTwoPi * rateHz * time) / 12.0);
+                             * std::sin (kTwoPi * rateHz * time + phaseRadians) / 12.0);
         buffer.getWritePointer (0)[i] = amplitude * static_cast<float> (std::sin (phase));
         phase += kTwoPi * instantaneous / sampleRate;
     }
@@ -255,14 +268,73 @@ std::vector<ReferencePitchFrame> vibratoReferenceFrames (
     double depthSemitones,
     double rateHz)
 {
+    return vibratoReferenceFramesWithPhase (durationSeconds, hopSeconds,
+                                            centreFrequencyHz, depthSemitones,
+                                            rateHz, 0.0);
+}
+
+std::vector<ReferencePitchFrame> vibratoReferenceFramesWithPhase (
+    double durationSeconds,
+    double hopSeconds,
+    double centreFrequencyHz,
+    double depthSemitones,
+    double rateHz,
+    double phaseRadians)
+{
     return buildReferenceFrames (
         durationSeconds, hopSeconds,
         [=] (double time)
         {
             return centreFrequencyHz
                  * std::pow (2.0, depthSemitones
-                                  * std::sin (kTwoPi * rateHz * time) / 12.0);
+                                  * std::sin (kTwoPi * rateHz * time + phaseRadians) / 12.0);
         },
+        [] (double) { return true; });
+}
+
+// Irregular vibrato trajectory, shared by the audio generator and the
+// reference builder so they agree exactly. The vibrato phase is the
+// integral of the drifting rate:
+//   phase(t) = 2*pi*(5.5*t + 1.5*(1 - cos(2*pi*0.3*t)) / (2*pi*0.3))
+namespace
+{
+double irregularVibratoFrequency (double time, double centreFrequencyHz)
+{
+    const double depth = 0.9 + 0.2 * std::sin (kTwoPi * 0.5 * time);
+    const double phase = kTwoPi
+        * (5.5 * time + 1.5 * (1.0 - std::cos (kTwoPi * 0.3 * time))
+               / (kTwoPi * 0.3));
+    return centreFrequencyHz
+        * std::pow (2.0, depth * std::sin (phase) / 12.0);
+}
+} // namespace
+
+juce::AudioBuffer<float> makeIrregularVibratoTone (double sampleRate,
+                                                   double durationSeconds,
+                                                   double centreFrequencyHz,
+                                                   float amplitude)
+{
+    const int samples = static_cast<int> (std::llround (sampleRate * durationSeconds));
+    juce::AudioBuffer<float> buffer (1, std::max (1, samples));
+    double phase = 0.0;
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+    {
+        const double time = static_cast<double> (i) / sampleRate;
+        const double instantaneous = irregularVibratoFrequency (time, centreFrequencyHz);
+        buffer.getWritePointer (0)[i] = amplitude * static_cast<float> (std::sin (phase));
+        phase += kTwoPi * instantaneous / sampleRate;
+    }
+    return buffer;
+}
+
+std::vector<ReferencePitchFrame> irregularVibratoReferenceFrames (
+    double durationSeconds,
+    double hopSeconds,
+    double centreFrequencyHz)
+{
+    return buildReferenceFrames (
+        durationSeconds, hopSeconds,
+        [=] (double time) { return irregularVibratoFrequency (time, centreFrequencyHz); },
         [] (double) { return true; });
 }
 
