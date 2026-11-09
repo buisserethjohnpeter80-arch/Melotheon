@@ -24,6 +24,7 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <numbers>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -440,8 +441,9 @@ void testBenchmarkVibrato()
 
         // +/-0.3 and +/-0.7 st stay inside the 0.72 st hysteresis, so the
         // curve must be followed and the note must stay whole. +/-1.0 st
-        // exceeds the hysteresis: splitting is expected behaviour and is
-        // recorded, not failed.
+        // exceeds the hysteresis and used to split into 8 notes (Phase 1
+        // baseline); the Phase 2A vibrato consolidation must keep it
+        // whole as well.
         if (depth <= 0.7)
         {
             CHECK (result.levelA.pitchStats.hasConditionalStats);
@@ -451,6 +453,285 @@ void testBenchmarkVibrato()
             if (result.notes->notes.size() == 1)
                 CHECK (result.notes->notes[0].midiNote == 69);
         }
+        if (depth >= 1.0)
+        {
+            CHECK (result.notes->notes.size() == 1);
+            if (result.notes->notes.size() == 1)
+            {
+                CHECK (result.notes->notes[0].midiNote == 69);
+                CHECK_NEAR (result.notes->notes[0].startSeconds, 0.0, 0.05);
+                CHECK_NEAR (result.notes->notes[0].endSeconds, 2.0, 0.05);
+            }
+        }
+    }
+}
+
+// ---- Phase 2A: vibrato-aware segmentation ----
+//
+// Phase 1 baseline (measured, not assumed): +/-1.0 st sustained
+// vibrato at 5.5 Hz split one 2 s note into 8; +/-0.3/0.7 st stayed
+// whole; glissando became an 11-note staircase; short-note recall was
+// 0/4 at 40/60/78 ms (production). This function re-measures all of
+// those after the vibrato-consolidation pass, under BOTH struct-default
+// and production-mapped segmentation settings, and adds the
+// discrimination cases the fix must not break: genuine semitone steps,
+// repeated notes with distinct attacks, fast alternation, irregular
+// vibrato, and a clip starting mid-vibrato.
+void testBenchmarkVibratoSegmentationPhase2A()
+{
+    for (int settingsIndex = 0; settingsIndex < 2; ++settingsIndex)
+    {
+        const bool production = settingsIndex == 1;
+        const PitchAnalysisSettings analysisSettings = production
+            ? productionMappedAnalysisSettings() : PitchAnalysisSettings{};
+        const NoteSegmentationSettings segmentationSettings = production
+            ? productionMappedSegmentationSettings() : NoteSegmentationSettings{};
+        const std::string settingsLabel = production ? "production" : "struct-defaults";
+
+        // 1. Sustained A4, no vibrato: one note.
+        {
+            AudioTestCase testCase = makeNoteSequenceCase (
+                "2a-stable-a4", 48000.0, 2.0, { { 440.0, 0.0, 2.0, 0.5f } });
+            const LevelBResult result = runLevelB (
+                testCase, analysisSettings, segmentationSettings);
+            benchPrint ("BENCH B 2a-stable-a4-" + settingsLabel + ": notes="
+                        + std::to_string (result.notes->notes.size()));
+            CHECK (result.notes->notes.size() == 1);
+            if (result.notes->notes.size() == 1)
+                CHECK (result.notes->notes[0].midiNote == 69);
+        }
+
+        // 2-4. Sustained A4 with +/-25, +/-50, +/-100 cents vibrato,
+        // at 4.0, 5.5 and 7.0 Hz: one note each.
+        for (double depth : { 0.25, 0.5, 1.0 })
+        {
+            for (double rate : { 4.0, 5.5, 7.0 })
+            {
+                AudioTestCase testCase;
+                testCase.name = "2a-vibrato";
+                testCase.sampleRate = 48000.0;
+                testCase.audio = makeVibratoTone (
+                    48000.0, 2.0, 440.0, depth, rate, 0.5f);
+                testCase.referenceFrames = vibratoReferenceFrames (
+                    2.0, kDefaultHopSeconds, 440.0, depth, rate);
+                ReferenceNote note;
+                note.startSeconds = 0.0;
+                note.endSeconds = 2.0;
+                note.frequencyHz = 440.0;
+                note.midiNote = 69;
+                testCase.referenceNotes.push_back (note);
+
+                const LevelBResult result = runLevelB (
+                    testCase, analysisSettings, segmentationSettings);
+                benchPrint ("BENCH B 2a-vibrato-" + fmt (depth, 2) + "st-"
+                            + fmt (rate, 1) + "hz-" + settingsLabel + ": notes="
+                            + std::to_string (result.notes->notes.size()));
+                CHECK (result.notes->notes.size() == 1);
+                if (result.notes->notes.size() == 1)
+                    CHECK (result.notes->notes[0].midiNote == 69);
+            }
+        }
+
+        // Peak-start vibrato (clip starts at the vibrato peak): the
+        // leading excursion must merge too.
+        {
+            AudioTestCase testCase;
+            testCase.name = "2a-vibrato-peak-start";
+            testCase.sampleRate = 48000.0;
+            testCase.audio = makeVibratoToneWithPhase (
+                48000.0, 2.0, 440.0, 1.0, 5.5, std::numbers::pi / 2.0, 0.5f);
+            testCase.referenceFrames = vibratoReferenceFramesWithPhase (
+                2.0, kDefaultHopSeconds, 440.0, 1.0, 5.5, std::numbers::pi / 2.0);
+            ReferenceNote note;
+            note.startSeconds = 0.0;
+            note.endSeconds = 2.0;
+            note.frequencyHz = 440.0;
+            note.midiNote = 69;
+            testCase.referenceNotes.push_back (note);
+
+            const LevelBResult result = runLevelB (
+                testCase, analysisSettings, segmentationSettings);
+            benchPrint ("BENCH B 2a-vibrato-peak-start-" + settingsLabel + ": notes="
+                        + std::to_string (result.notes->notes.size()));
+            CHECK (result.notes->notes.size() == 1);
+            if (result.notes->notes.size() == 1)
+                CHECK (result.notes->notes[0].midiNote == 69);
+        }
+
+        // Irregular vibrato (drifting depth 0.7-1.1 st, rate 4-7 Hz).
+        {
+            AudioTestCase testCase;
+            testCase.name = "2a-vibrato-irregular";
+            testCase.sampleRate = 48000.0;
+            testCase.audio = makeIrregularVibratoTone (48000.0, 2.0, 440.0, 0.5f);
+            testCase.referenceFrames = irregularVibratoReferenceFrames (
+                2.0, kDefaultHopSeconds, 440.0);
+            ReferenceNote note;
+            note.startSeconds = 0.0;
+            note.endSeconds = 2.0;
+            note.frequencyHz = 440.0;
+            note.midiNote = 69;
+            testCase.referenceNotes.push_back (note);
+
+            const LevelBResult result = runLevelB (
+                testCase, analysisSettings, segmentationSettings);
+            benchPrint ("BENCH B 2a-vibrato-irregular-" + settingsLabel + ": notes="
+                        + std::to_string (result.notes->notes.size()));
+            CHECK (result.notes->notes.size() == 1);
+            if (result.notes->notes.size() == 1)
+                CHECK (result.notes->notes[0].midiNote == 69);
+        }
+
+        // 5. Two genuine consecutive notes one semitone apart, both
+        // directions: two notes each.
+        for (const auto& stepPair : { std::pair<double, double> { 440.0, 466.16 },
+                                      std::pair<double, double> { 466.16, 440.0 } })
+        {
+            AudioTestCase testCase = makeNoteSequenceCase (
+                "2a-semitone-step", 48000.0, 1.0,
+                { { stepPair.first, 0.0, 0.5, 0.5f },
+                  { stepPair.second, 0.5, 0.5, 0.5f } });
+            const LevelBResult result = runLevelB (
+                testCase, analysisSettings, segmentationSettings);
+            benchPrint ("BENCH B 2a-semitone-step-" + settingsLabel + ": notes="
+                        + std::to_string (result.notes->notes.size()));
+            CHECK (result.notes->notes.size() == 2);
+            if (result.notes->notes.size() == 2)
+            {
+                CHECK (result.notes->notes[0].midiNote
+                       == static_cast<int> (std::lround (
+                           frequencyToMidiDouble (stepPair.first))));
+                CHECK (result.notes->notes[1].midiNote
+                       == static_cast<int> (std::lround (
+                           frequencyToMidiDouble (stepPair.second))));
+            }
+        }
+
+        // 6. Repeated notes of the same pitch with distinct attacks
+        // (silence gaps): the gap is the onset evidence, and the merge
+        // pass must not join them.
+        for (double gap : { 0.12, 0.15 })
+        {
+            AudioTestCase testCase = makeNoteSequenceCase (
+                "2a-repeated-a4", 48000.0, 1.0 + gap,
+                { { 440.0, 0.0, 0.5, 0.5f },
+                  { 440.0, 0.5 + gap, 0.5, 0.5f } });
+            const LevelBResult result = runLevelB (
+                testCase, analysisSettings, segmentationSettings);
+            benchPrint ("BENCH B 2a-repeated-a4-gap" + fmt (gap * 1000.0, 0)
+                        + "ms-" + settingsLabel + ": notes="
+                        + std::to_string (result.notes->notes.size()));
+            CHECK (result.notes->notes.size() == 2);
+            if (result.notes->notes.size() == 2)
+            {
+                CHECK (result.notes->notes[0].midiNote == 69);
+                CHECK (result.notes->notes[1].midiNote == 69);
+            }
+        }
+
+        // 7. Fast alternating notes: genuine transitions must not merge.
+        for (double step : { 0.15, 0.20 })
+        {
+            std::vector<SequenceNoteSpec> specs;
+            const int count = static_cast<int> (std::llround (1.2 / step));
+            for (int i = 0; i < count; ++i)
+                specs.push_back ({ (i % 2 == 0) ? 440.0 : 466.16,
+                                   static_cast<double> (i) * step, step, 0.5f });
+            AudioTestCase testCase = makeNoteSequenceCase (
+                "2a-alternating", 48000.0, 1.2, specs);
+            const LevelBResult result = runLevelB (
+                testCase, analysisSettings, segmentationSettings);
+            benchPrint ("BENCH B 2a-alternating-" + fmt (step * 1000.0, 0)
+                        + "ms-" + settingsLabel + ": notes="
+                        + std::to_string (result.notes->notes.size())
+                        + " expected=" + std::to_string (count));
+            CHECK (result.notes->notes.size() == static_cast<size_t> (count));
+        }
+    }
+
+    // 8. Glissando: measure and report only. The count must stay at the
+    // Phase 1 baseline (11 notes, contiguous staircase): the fix must
+    // not leak into slide handling, and no new glissando policy is
+    // implemented here.
+    {
+        AudioTestCase testCase;
+        testCase.name = "glissando-220-440";
+        testCase.sampleRate = 48000.0;
+        testCase.audio = makeGlissandoTone (48000.0, 1.0, 220.0, 440.0, 0.5f);
+        testCase.referenceFrames = glissandoReferenceFrames (1.0, kDefaultHopSeconds,
+                                                             220.0, 440.0);
+        const LevelBResult result = runLevelB (testCase);
+        std::string noteList;
+        for (const auto& note : result.notes->notes)
+            noteList += " [" + std::to_string (note.midiNote) + " "
+                      + fmt (note.startSeconds, 2) + "-" + fmt (note.endSeconds, 2) + "s]";
+        benchPrint ("BENCH B 2a-glissando: " + std::to_string (result.notes->notes.size())
+                    + " notes:" + noteList);
+        CHECK (result.notes->notes.size() == 11);
+    }
+
+    // 9. Short notes: report regression results against the Phase 1
+    // baseline (struct: 0/4 at 40/60 ms, 4/4 at 78/100 ms;
+    // production: 0/4 at 40/60/78 ms, >=3/4 at 100 ms).
+    {
+        const std::vector<double> frequencies { 261.63, 293.66, 329.63, 392.00 };
+        for (double duration : { 0.040, 0.060, 0.078, 0.100 })
+        {
+            std::vector<SequenceNoteSpec> specs;
+            for (size_t i = 0; i < frequencies.size(); ++i)
+                specs.push_back ({ frequencies[i], static_cast<double> (i) * duration,
+                                   duration, 0.5f });
+            AudioTestCase testCase = makeNoteSequenceCase (
+                "2a-short-notes", 48000.0, duration * 4.0, specs);
+            for (int settingsIndex = 0; settingsIndex < 2; ++settingsIndex)
+            {
+                const bool production = settingsIndex == 1;
+                const LevelBResult result = runLevelB (
+                    testCase,
+                    production ? productionMappedAnalysisSettings() : PitchAnalysisSettings{},
+                    production ? productionMappedSegmentationSettings() : NoteSegmentationSettings{});
+                benchPrint ("BENCH B 2a-short-" + std::to_string (static_cast<int> (duration * 1000))
+                            + "ms-" + (production ? "production" : "struct-defaults")
+                            + ": matched=" + std::to_string (result.noteMatch.matched)
+                            + " missed=" + std::to_string (result.noteMatch.missed)
+                            + " false=" + std::to_string (result.noteMatch.falsePositives));
+                if (! production && duration >= 0.078)
+                    CHECK (result.noteMatch.matched == 4);
+                if (production && duration >= 0.100)
+                    CHECK (result.noteMatch.matched >= 3);
+                if (production && duration < 0.100)
+                    CHECK (result.noteMatch.matched == 0);
+                if (! production && duration < 0.078)
+                    CHECK (result.noteMatch.matched == 0);
+            }
+        }
+    }
+
+    // 10. Silence and noise: no new false notes.
+    {
+        AudioTestCase silenceCase;
+        silenceCase.name = "2a-silence";
+        silenceCase.sampleRate = 48000.0;
+        silenceCase.audio = makeSilence (48000.0, 1.0);
+        silenceCase.referenceFrames = buildReferenceFrames (
+            1.0, kDefaultHopSeconds,
+            [] (double) { return 0.0; }, [] (double) { return false; });
+        const LevelBResult silenceResult = runLevelB (silenceCase);
+        benchPrint ("BENCH B 2a-silence: notes="
+                    + std::to_string (silenceResult.notes->notes.size()));
+        CHECK (silenceResult.notes->notes.empty());
+
+        AudioTestCase noiseCase;
+        noiseCase.name = "2a-white-noise";
+        noiseCase.sampleRate = 48000.0;
+        noiseCase.audio = makeWhiteNoise (48000.0, 1.0, 0.5f);
+        noiseCase.referenceFrames = buildReferenceFrames (
+            1.0, kDefaultHopSeconds,
+            [] (double) { return 0.0; }, [] (double) { return false; });
+        const LevelBResult noiseResult = runLevelB (noiseCase);
+        benchPrint ("BENCH B 2a-white-noise: notes="
+                    + std::to_string (noiseResult.notes->notes.size()));
+        CHECK (noiseResult.notes->notes.empty());
     }
 }
 
@@ -1226,6 +1507,7 @@ BenchmarkTestOutcome runPitchBenchmarkTests()
     testBenchmarkWhiteNoise();
     testBenchmarkShortNotes();
     testBenchmarkVibrato();
+    testBenchmarkVibratoSegmentationPhase2A();
     testBenchmarkGlissando();
     testBenchmarkSampleRates();
     testBenchmarkNoteTiming();
