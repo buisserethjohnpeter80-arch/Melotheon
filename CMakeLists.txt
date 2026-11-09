@@ -131,6 +131,8 @@ juce_add_console_app(MelotheonTests)
 target_sources(MelotheonTests
     PRIVATE
         Tests/MelotheonTests.cpp
+        Tests/PitchBenchmark.cpp
+        Tests/PitchBenchmarkTests.cpp
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
         Source/Audio/AudioCaptureEngine.cpp
